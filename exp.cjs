@@ -11,7 +11,7 @@ const ABILITIES = ['除錯', '架構', '實作', '重構', '研究', '工具', '
 
 // ---- 路徑 ----
 function resolveHome() {
-  return process.env.EXP_HOME || path.join(os.homedir(), '.claude', 'exp');
+  return process.env.EXPBOOK_HOME || path.join(os.homedir(), '.claude', 'expbook');
 }
 function paths(base = resolveHome()) {
   return {
@@ -266,7 +266,7 @@ function writeView(p, file, content, summary) {
   console.log(`→ views/${file}${summary ? '（' + summary + '）' : ''}`);
 }
 
-const HELP = `EXP 指令
+const HELP = `ExpBook 指令
   寫入：
     task   "<事由>" --type <類型> [--dungeon <副本>]   完成任務 +100
     lesson "<教訓>" [--type <類型>] [--dungeon <副本>]  教訓 +1

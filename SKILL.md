@@ -1,11 +1,12 @@
 ---
-name: EXP
-description: Agent 成長歷程系統。用 exp.cjs 記錄每輪工作（task/lesson/facet/fail）、依口語產生玩家面板與各式報告檔。Triggers：「檢視玩家面板」「show EXP status」「show EXP help」「看歷程」「週報」「看 X 副本」「能力分布」。
+name: ExpBook
+description: Agent 成長歷程系統（ExpBook）。用 exp.cjs 記錄每輪工作（task/lesson/facet/fail）、依口語產生玩家面板與各式報告檔。EXP 為經驗值單位、ExpBook 為系統名。Triggers：「檢視玩家面板」「show ExpBook status」「ExpBook help」「看歷程」「週報」「看 X 副本」「能力分布」。
 ---
 
-# EXP — Agent 成長歷程系統
+# ExpBook — Agent 成長歷程系統
 
-腳本：`scripts/exp.cjs`（純 Node，零依賴）。資料在 `~/.claude/exp/`（可用 `EXP_HOME` 覆寫）。
+腳本：`scripts/exp.cjs`（純 Node，零依賴）。資料在 `~/.claude/expbook/`（可用 `EXPBOOK_HOME` 覆寫）。
+（命名：**ExpBook = 系統名**；**EXP = 經驗值單位**。對話一律稱 ExpBook，避免單講「exp」與其他項目混淆。）
 
 ## 最高原則：厚程式、薄 AI
 所有計算/渲染由 exp.cjs 完成。AI 每輪只做：辨識意圖 → 發一條短指令 → 轉述一行指標。**禁止把報告檔內容讀進對話**；檢視結果一律請使用者自行開檔。
@@ -22,8 +23,8 @@ description: Agent 成長歷程系統。用 exp.cjs 記錄每輪工作（task/le
 ## 口語觸發對照（使用者口語 → 指令）
 | 口語（中英夾雜皆認） | 指令 |
 |----|----|
-| 檢視玩家面板 / show EXP status / 現在幾級 | `status` |
-| show EXP help / 有哪些指令 | `help` |
+| 檢視玩家面板 / show ExpBook status / 現在幾級 | `status` |
+| ExpBook help / 有哪些指令 | `help` |
 | 看歷程 / 我最近做了什麼 | `history [篩選]` |
 | 本週做了什麼 / 週報 / 這個月幹了啥 | `report --since 本週\|本月` |
 | 看 X 副本 / 這專案做過什麼 | `dungeon X` |

@@ -10,17 +10,17 @@ const exp = require('../exp.cjs');
 const CLI = path.join(__dirname, '..', 'exp.cjs');
 function tmpHome() {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'exp-'));
-  process.env.EXP_HOME = d;
+  process.env.EXPBOOK_HOME = d;
   return d;
 }
 function run(args, home) {
   return execFileSync('node', [CLI, ...args], {
-    env: { ...process.env, EXP_HOME: home }, encoding: 'utf8',
+    env: { ...process.env, EXPBOOK_HOME: home }, encoding: 'utf8',
   });
 }
 function runFail(args, home) {
   try {
-    execFileSync('node', [CLI, ...args], { env: { ...process.env, EXP_HOME: home }, encoding: 'utf8', stdio: 'pipe' });
+    execFileSync('node', [CLI, ...args], { env: { ...process.env, EXPBOOK_HOME: home }, encoding: 'utf8', stdio: 'pipe' });
     return { status: 0, stderr: '' };
   } catch (e) {
     return { status: e.status, stderr: (e.stderr || '') + (e.stdout || '') };
@@ -41,11 +41,11 @@ test('progressFor: 回報進度', () => {
   assert.equal(p.toNext, 320);
   assert.equal(p.step, 500);
 });
-test('resolveHome: EXP_HOME 優先', () => {
-  const old = process.env.EXP_HOME;
-  process.env.EXP_HOME = path.join('X', 'Y');
+test('resolveHome: EXPBOOK_HOME 優先', () => {
+  const old = process.env.EXPBOOK_HOME;
+  process.env.EXPBOOK_HOME = path.join('X', 'Y');
   assert.equal(exp.resolveHome(), path.join('X', 'Y'));
-  process.env.EXP_HOME = old;
+  process.env.EXPBOOK_HOME = old;
 });
 
 // ---- Task 2 ----
