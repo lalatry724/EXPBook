@@ -115,7 +115,7 @@
 ### 6.3 `STATUS.md`（渲染的狀態板）
 每次寫入後重繪，可隨時 glance：
 ```
-# Agent 狀態板
+# EXP 玩家面板
 
 主線　Lv4　EXP 1680　▓▓▓▓▓▓░░ 360/500 到 Lv5
 
@@ -158,8 +158,9 @@ node exp.cjs report  --since <今日|本週|本月|YYYY-MM-DD[..YYYY-MM-DD]>  # 
 ```
 `history` 篩選：`--dungeon` / `--type` / `--kind` / `--since` / `--limit`（預設 20）。
 
-### 維運
+### 維運 / 說明
 ```
+node exp.cjs help        # 列出所有指令與口語對照（stdout，內容精簡固定）
 node exp.cjs rebuild     # 從 log.jsonl 重算 state.json + 重繪所有 view 檔（改公式後用）
 node exp.cjs init
 ```
@@ -195,6 +196,20 @@ node exp.cjs init
 - **事由品質規範**：寫成**可讀成果句**（「修好 X 的 off-by-one」），禁止「修了東西」這種空話。
 - 每輪對話結束依當輪表現呼叫；結束時可 `status` 給使用者看當前成長。
 
+### 8.1 口語觸發對照（使用者口語 → 指令；寫進 SKILL.md）
+使用者多以自然語句要求檢視，中英夾雜皆須辨識。對照如下：
+
+| 使用者口語（例） | 執行指令 | 回應方式 |
+|------------------|---------|---------|
+| 「檢視玩家面板」「show EXP status」「角色面板」「現在幾級」 | `status` | 產生 `STATUS.md`，回指標請使用者開檔 |
+| 「show EXP help」「EXP 指令」「有哪些指令」 | `help` | stdout 精簡列出（內容固定，token 低） |
+| 「看歷程」「EXP history」「我最近做了什麼」 | `history [篩選]` | 產生 `views/history.md`，回指標 |
+| 「本週做了什麼」「週報」「這個月幹了啥」 | `report --since 本週\|本月` | 產生 `views/report-<期間>.md`，回指標 |
+| 「看 X 副本」「show dungeon X」「這專案做過什麼」 | `dungeon X` | 產生 `views/dungeon-X.md`，回指標 |
+| 「我哪方面強/弱」「能力分布」「show ability」 | `ability [類型]` | 產生 `views/ability.md`，回指標 |
+
+- 通則：除 `help` 外，**檢視一律產報告檔、stdout 只回指標**，不把報告內容讀進對話。
+
 ---
 
 ## 9. 使用情境
@@ -221,6 +236,6 @@ node exp.cjs init
 4. 路徑解析：`EXP_HOME` → `os.homedir()/.claude/exp/`（可移植）
 5. 副本名推導（cwd 資料夾名）＋近似名警告
 6. `--since` 解析（今日/本週/本月/單日/區間）
-7. `rebuild`：從 log 重算 state + 重繪所有 view 檔
-8. SKILL.md：自律觸發規則 + 事由品質規範
+7. `rebuild`：從 log 重算 state + 重繪所有 view 檔；`help`：精簡指令列表（stdout）
+8. SKILL.md：自律觸發規則 + 事由品質規範 + **口語觸發對照表**（§8.1）
 9. 棄用舊 meritBook：**直接忽略**舊 `merit_demerit.md` 資料，不遷移、不封存。
