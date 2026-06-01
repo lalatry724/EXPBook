@@ -19,10 +19,11 @@
 ### 核心設計原則
 - **歷程優先**：log 是唯一真相，等級是「算出來的」。改公式只需 `rebuild` 重算，不卡死歷史。
 - **可移植**：純 Node、零外部依賴，所有資料在單一資料夾。路徑以 `os.homedir()` 動態解析（預設 `~/.claude/exp/`），可用環境變數 `EXP_HOME` 覆寫 → 換機器/換位置都能跑。
-- **低耗 token 檢視**（全域 log 會越長越大，必須遵守）：
-  - **永遠不直接讀 `log.jsonl`**；一律透過 CLI 取切片。raw log 是 CLI 專用資料層，禁止整份 cat 進對話。
-  - 看現況 → 讀 `STATUS.md`（有上限渲染：面向清單只顯示最近 N 條＋總數）。成本低且固定。
-  - 看歷程 → `history` 預設只回**最近 20 筆**，靠 `--since/--dungeon/--type/--limit` 篩選；token 成本由查詢決定，與 log 總大小無關。
+- **低耗 token 檢視 — 核心約束**（全域 log 會越長越大，必須遵守）：
+  - **檔案優先，非 stdout**：所有 view 指令（`status` / `history`）把渲染結果**寫成檔案**，stdout 只回**一行指標**（如「→ 已產生 views/history-本週.md，42 筆」）。**使用者自己開檔讀 = 0 AI token**。這是省 token 的根本手段（即使只回 20 行，經 AI 對話仍吃 token）。
+  - **永遠不直接讀 `log.jsonl`**：raw log 是 CLI 專用資料層，禁止整份 cat 進對話。
+  - 兩條消費路徑：① 人類瀏覽（主要）→ 讀 CLI 產生的 view 檔；② AI 需要狀態（少數）→ 讀有上限的 `STATUS.md`，或 CLI 回的極短摘要行。
+  - view 檔本身有上限渲染：`STATUS.md` 面向清單只顯示最近 N 條＋總數；`history` 預設最近 20 筆，靠 `--since/--dungeon/--type/--limit` 篩選。
 - **完全獨立**：不綁定、不讀取任何既有技能（journal / retrospect / work-report / 自知機制）。
 - **YAGNI**：先做夠用的，未來再長。
 
@@ -126,29 +127,59 @@
     - Activity UI 結構 / Arena 戰鬥流程
 ```
 
+### 6.4 `views/`（檢視指令產生的報告檔）
+- `views/history.md`、`views/dungeon-<副本>.md`、`views/ability.md`、`views/report-<期間>.md`
+- 固定檔名、每次覆寫；供使用者直接開檔閱讀（0 AI token）。
+
 ---
 
 ## 7. CLI 介面（`exp.cjs`，AI 自律呼叫）
 
+### 輸出總約定（省 token 核心）
+- **寫入指令**：stdout 回一行確認（如「✓ task +100｜主線 Lv4 (1680)」）。
+- **檢視指令**：**一律把報告渲染成檔案**寫到 `~/.claude/exp/views/`，**stdout 只回一行指標**（如「→ views/report-本週.md（42 筆，+4200 EXP）」），由使用者自行開檔閱讀 = 0 AI token。
+- view 檔用**固定檔名、每次覆寫**（不堆積垃圾，永遠是最新），篩選條件寫進檔案標頭。
+
+### 寫入事件
 ```
-node exp.cjs task   "<事由>" --type <類型> [--dungeon <副本>]   # +100（三線同推）
-node exp.cjs lesson "<教訓>" [--type <類型>] [--dungeon <副本>] # +1
-node exp.cjs facet  <副本> "<探明面向>"                          # 副本 +20，記面向
+node exp.cjs task   "<事由>" --type <類型> [--dungeon <副本>]    # +100（主線+能力+副本三線同推）
+node exp.cjs lesson "<教訓>" [--type <類型>] [--dungeon <副本>]  # +1
+node exp.cjs facet  <副本> "<探明面向>"                           # 副本 +20，記面向
 node exp.cjs fail   "<失敗筆記>" [--type <類型>] [--dungeon <副本>] # exp 0，只進歷程
-node exp.cjs history [--dungeon X] [--type Y] [--kind K] [--since 今日|本週|本月|YYYY-MM-DD] [--limit N]
-node exp.cjs status                                              # 印當前狀態板
-node exp.cjs rebuild                                            # 從 log 重算 state + STATUS.md
+```
+
+### 檢視（皆產生報告檔，stdout 只回指標）
+```
+node exp.cjs status                          # → STATUS.md          當前快照：主線+能力+副本一覽
+node exp.cjs history [篩選]                   # → views/history.md    時間軸流水帳（核心）
+node exp.cjs dungeon <副本>                    # → views/dungeon-<副本>.md  單一副本完整報告
+node exp.cjs ability [<類型>]                  # → views/ability.md    能力分布總覽 / 單一能力明細
+node exp.cjs report  --since <今日|本週|本月|YYYY-MM-DD[..YYYY-MM-DD]>  # → views/report-<期間>.md  期間彙總
+```
+`history` 篩選：`--dungeon` / `--type` / `--kind` / `--since` / `--limit`（預設 20）。
+
+### 維運
+```
+node exp.cjs rebuild     # 從 log.jsonl 重算 state.json + 重繪所有 view 檔（改公式後用）
 node exp.cjs init
 ```
 
-### `history`（核心功能）— 純時間軸流水帳，一行一事件
+### 報告檔內容範例
+
+`views/history.md`（純時間軸，一行一事件）：
 ```
 2026-06-01 14:23  +100  [除錯]  (MobileAnime)  修好 Arena 戰鬥結算 off-by-one
 2026-05-30 11:40  +20   [面向]  (MobileAnime)  Arena 戰鬥結算流程
 2026-05-30 10:02  ✗     [實作]  (MobileAnime)  嘗試 A 方案失敗，未定位根因
 ```
-- 篩選：`--dungeon`（某專案歷程）、`--type`、`--kind`、`--since`、`--limit`
-- 預設不帶副本：印主線（全域）時間軸。
+
+`views/report-本週.md`（期間彙總）：
+```
+# 本週彙總 2026-05-26 ~ 06-01
+完成任務 12｜教訓 5｜面向 8｜失敗 2｜本週 +1325 EXP
+依類型：除錯 5、實作 4、架構 2、研究 1
+依副本：MobileAnime 9、exp 3
+```
 
 ### 副本名預設推導
 - `--dungeon` 省略時，取「當前工作目錄資料夾名」為副本。
@@ -184,9 +215,12 @@ node exp.cjs init
 
 ## 11. 待實作清單（給後續 writing-plans）
 
-1. `exp.cjs`：init / task / lesson / facet / fail / history / status / rebuild
-2. log.jsonl 讀寫、state.json 由 log 計算、STATUS.md 渲染
-3. 副本名推導（cwd 資料夾名）＋近似名警告
-4. `--since` 解析（今日/本週/本月/日期）
-5. SKILL.md：自律觸發規則 + 事由品質規範
-6. 棄用舊 meritBook：**直接忽略**舊 `merit_demerit.md` 資料，不遷移、不封存。
+1. `exp.cjs` 寫入指令：init / task / lesson / facet / fail（stdout 回確認行）
+2. `exp.cjs` 檢視指令：status / history / dungeon / ability / report — **皆渲染成 `views/` 報告檔，stdout 只回指標**（固定檔名覆寫）
+3. log.jsonl 讀寫、state.json 由 log 計算、STATUS.md 與 views/* 渲染
+4. 路徑解析：`EXP_HOME` → `os.homedir()/.claude/exp/`（可移植）
+5. 副本名推導（cwd 資料夾名）＋近似名警告
+6. `--since` 解析（今日/本週/本月/單日/區間）
+7. `rebuild`：從 log 重算 state + 重繪所有 view 檔
+8. SKILL.md：自律觸發規則 + 事由品質規範
+9. 棄用舊 meritBook：**直接忽略**舊 `merit_demerit.md` 資料，不遷移、不封存。
