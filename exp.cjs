@@ -136,16 +136,16 @@ function kindTag(e) {
 function renderStatus(state) {
   const g = progressFor(state.global.exp);
   let out = `# EXP 玩家面板\n\n`;
-  out += `主線　Lv${g.lv}　EXP ${state.global.exp}　${bar(g.into, g.step)} ${g.into}/${g.step} 到 Lv${g.lv + 1}\n\n`;
+  out += `主線 LV${g.lv} (${g.into}/${g.step})  total: ${state.global.exp}\n\n`;
   out += `能力\n`;
   for (const a of ABILITIES) {
     const p = progressFor(state.abilities[a].exp);
-    out += `  ${a} Lv${p.lv} ${bar(p.into, p.step)}\n`;
+    out += `  ${a} LV${p.lv} (${p.into}/${p.step})  total: ${state.abilities[a].exp}\n`;
   }
   out += `\n副本\n`;
   for (const [name, d] of Object.entries(state.dungeons)) {
-    const lv = levelFor(d.exp);
-    out += `  【${name}】Lv${lv}　EXP ${d.exp}　已探明 ${d.facets.length} 項\n`;
+    const p = progressFor(d.exp);
+    out += `  【${name}】LV${p.lv} (${p.into}/${p.step})  total: ${d.exp}　已探明 ${d.facets.length} 項\n`;
     for (const f of d.facets.slice(-5)) out += `    - ${f}\n`;
   }
   out += `\n更新時間：${state.updated || '—'}\n`;
