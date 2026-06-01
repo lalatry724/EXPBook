@@ -11,14 +11,17 @@ description: Agent 成長歷程系統（ExpBook）。用 exp.cjs 記錄每輪工
 ## 最高原則：厚程式、薄 AI
 所有計算/渲染由 exp.cjs 完成。AI 每輪只做：辨識意圖 → 發一條短指令 → 轉述一行指標。**禁止把報告檔內容讀進對話**；檢視結果一律請使用者自行開檔。
 
-## 自律記錄（每輪結束依表現呼叫）
-- `task`：使用者一個明確交付、且已做完並驗證 → `node scripts/exp.cjs task "<可讀成果句>" --type <類型> [--dungeon <副本>]`
-- `lesson`：犯錯後修正並學到可複用教訓 → `node scripts/exp.cjs lesson "<教訓>"`
-- `facet`：在某副本探明新面向 → `node scripts/exp.cjs facet <副本> "<面向>"`
-- `fail`：嘗試失敗、未得可複用教訓，仍誠實留一筆 → `node scripts/exp.cjs fail "<失敗筆記>"`
+## 自律記錄（A+C 機制：AI 判斷 → Stop hook 沖刷）
+回合中判斷該記時，用 **stage 暫存**（語意由我判斷）；**Stop hook 每輪結束自動 flush** 進 log，不需手動 flush。
+- task：明確交付、做完並驗證 → `node scripts/exp.cjs stage --kind task "<可讀成果句>" --type <類型> [--dungeon <副本>]`
+- lesson：犯錯修正並學到可複用教訓 → `node scripts/exp.cjs stage --kind lesson "<教訓>" [--type ..]`
+- facet：在某副本探明新面向 → `node scripts/exp.cjs stage --kind facet "<面向>" --dungeon <副本>`
+- fail：嘗試失敗、未得教訓，仍誠實留一筆 → `node scripts/exp.cjs stage --kind fail "<失敗筆記>"`
+- 也可直接 `task/lesson/facet/fail`（立即落 log，不經 stage），兩種皆可。
 - 事由品質：寫「做了什麼、結果如何」（例「修好 Arena 戰鬥結算 off-by-one」），禁止「修了東西」。
 - 副本省略時程式自動取當前資料夾名；一資料夾＝一專案。
 - 類型：除錯 / 架構 / 實作 / 重構 / 研究 / 工具 / 知識。
+- **安全網**：Stop hook 偵測到「有新 commit 但本輪沒記」會在下一輪提醒；看到提醒請補 stage。
 
 ## 口語觸發對照（使用者口語 → 指令）
 | 口語（中英夾雜皆認） | 指令 |

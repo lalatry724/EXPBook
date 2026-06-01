@@ -273,6 +273,39 @@ test('safeName: 阻擋路徑穿越', () => {
   assert.equal(exp.safeName('../../etc'), '____etc');
   assert.equal(exp.safeName('a/b\\c'), 'a_b_c');
 });
+// ---- A+C stage/flush ----
+test('stage 寫入 _pending、不進 log', () => {
+  const home = tmpHome();
+  const p = exp.paths(home);
+  run(['stage', '--kind', 'task', '做了 X', '--type', '實作', '--dungeon', 'demo'], home);
+  assert.equal(exp.readPending(p).length, 1);
+  assert.equal(exp.readPending(p)[0].reason, '做了 X');
+  assert.deepEqual(exp.readLog(p), []); // 還沒進 log
+});
+test('flush 把 _pending 沖進 log 並清空', () => {
+  const home = tmpHome();
+  const p = exp.paths(home);
+  run(['stage', '--kind', 'task', 'A', '--type', '除錯', '--dungeon', 'demo'], home);
+  run(['stage', '--kind', 'lesson', 'B', '--dungeon', 'demo'], home);
+  const out = run(['flush'], home);
+  assert.match(out, /flushed 2/);
+  const evs = exp.readLog(p);
+  assert.equal(evs.length, 2);
+  assert.equal(evs[0].exp, 100);
+  assert.equal(evs[1].kind, 'lesson');
+  assert.equal(exp.readPending(p).length, 0); // 已清空
+  assert.equal(JSON.parse(fs.readFileSync(p.stateFile, 'utf8')).global.exp, 101);
+});
+test('flush 空 _pending → 0 筆、不報錯', () => {
+  const home = tmpHome();
+  const out = run(['flush'], home);
+  assert.match(out, /flushed 0/);
+});
+test('stage 未知 kind → 報錯退出', () => {
+  const home = tmpHome();
+  const r = runFail(['stage', '--kind', 'bogus', 'x'], home);
+  assert.notEqual(r.status, 0);
+});
 test('dungeon 路徑穿越輸入 → 檔案仍在 views 內', () => {
   const home = tmpHome();
   run(['facet', 'demo', 'x'], home);

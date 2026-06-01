@@ -20,6 +20,7 @@ function paths(base = resolveHome()) {
     stateFile: path.join(base, 'state.json'),
     statusFile: path.join(base, 'STATUS.md'),
     viewsDir: path.join(base, 'views'),
+    pendingFile: path.join(base, '_pending.jsonl'),
   };
 }
 
@@ -239,11 +240,34 @@ function persist(p) {
   fs.writeFileSync(p.statusFile, renderStatus(state));
   return state;
 }
-function addEvent(kind, reason, { type, dungeon } = {}, p = paths()) {
+function buildEvent(kind, reason, { type, dungeon } = {}) {
   const ev = { ts: now(), kind, reason };
   if (type) ev.type = type;
   if (dungeon) ev.dungeon = dungeon;
   ev.exp = kind === 'fail' ? 0 : (EXP_OF[kind] ?? 0);
+  return ev;
+}
+
+// ---- A+C：暫存(stage) 與 沖刷(flush) ----
+function stagePending(entry, p = paths()) {
+  ensureBase(p);
+  fs.appendFileSync(p.pendingFile, JSON.stringify(entry) + '\n');
+}
+function readPending(p = paths()) {
+  if (!fs.existsSync(p.pendingFile)) return [];
+  return fs.readFileSync(p.pendingFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
+function flushPending(p = paths()) {
+  const items = readPending(p);
+  if (!items.length) return 0;
+  for (const it of items) appendEvent(buildEvent(it.kind, it.reason, { type: it.type, dungeon: it.dungeon }), p);
+  persist(p);
+  fs.writeFileSync(p.pendingFile, '');
+  return items.length;
+}
+
+function addEvent(kind, reason, { type, dungeon } = {}, p = paths()) {
+  const ev = buildEvent(kind, reason, { type, dungeon });
   if (dungeon) {
     const dup = nearDup(dungeon, Object.keys(readState(p).dungeons || {}));
     if (dup) process.stderr.write(`⚠ 副本「${dungeon}」近似既有「${dup}」，確認是否同一個\n`);
@@ -278,6 +302,9 @@ const HELP = `ExpBook 指令
     dungeon <副本>              → views/dungeon-<副本>.md
     ability [<類型>]            → views/ability.md
     report --since <今日|本週|本月|YYYY-MM-DD[..YYYY-MM-DD]>  → views/report-<期間>.md
+  暫存/沖刷（hook 用）：
+    stage --kind <task|lesson|facet|fail> "<事由>" [--type ..] [--dungeon ..]   暫存到 _pending
+    flush                      把 _pending 全部沖進 log（Stop hook 每輪呼叫）
   維運：rebuild ｜ init ｜ help
   類型：${ABILITIES.join(' / ')}`;
 
@@ -330,6 +357,18 @@ function main(argv) {
       writeView(p, `report-${safeName(spec)}.md`, renderReport(readLog(p), range, spec));
       break;
     }
+    case 'stage': {
+      if (!['task', 'lesson', 'facet', 'fail'].includes(flags.kind)) die('stage 需 --kind task|lesson|facet|fail');
+      const reason = need(pos[0], 'stage 需事由：stage --kind task "<事由>"');
+      stagePending({ kind: flags.kind, reason, type: flags.type, dungeon: dgn() });
+      console.log(`✎ staged ${flags.kind}｜${reason}`);
+      break;
+    }
+    case 'flush': {
+      const n = flushPending(paths());
+      console.log(`✓ flushed ${n} 筆`);
+      break;
+    }
     case 'rebuild': {
       const p = paths(); const s = persist(p);
       console.log(`已從 log 重建 state（主線 EXP ${s.global.exp}）`);
@@ -349,6 +388,7 @@ module.exports = {
   renderStatus, renderHistory, renderDungeon, renderAbility, renderReport,
   dungeonFromCwd, nearDup, parseFlags, addEvent, persist,
   historyLines, writeView, safeName,
+  buildEvent, stagePending, readPending, flushPending,
 };
 
 if (require.main === module) main(process.argv.slice(2));
