@@ -18,6 +18,14 @@ function run(args, home) {
     env: { ...process.env, EXP_HOME: home }, encoding: 'utf8',
   });
 }
+function runFail(args, home) {
+  try {
+    execFileSync('node', [CLI, ...args], { env: { ...process.env, EXP_HOME: home }, encoding: 'utf8', stdio: 'pipe' });
+    return { status: 0, stderr: '' };
+  } catch (e) {
+    return { status: e.status, stderr: (e.stderr || '') + (e.stdout || '') };
+  }
+}
 
 // ---- Task 1 ----
 test('levelFor: 每 500 EXP 升一級', () => {
@@ -231,4 +239,48 @@ test('CLI rebuild: 從 log 重建 state', () => {
   const out = run(['rebuild'], home);
   assert.match(out, /重建/);
   assert.equal(JSON.parse(fs.readFileSync(p.stateFile, 'utf8')).global.exp, 100);
+});
+
+// ---- 自我檢視修正 ----
+test('task 缺事由 → 報錯退出、不寫 log', () => {
+  const home = tmpHome();
+  const r = runFail(['task'], home);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /請提供事由/);
+  assert.deepEqual(exp.readLog(exp.paths(home)), []);
+});
+test('facet 缺面向 → 報錯退出', () => {
+  const home = tmpHome();
+  const r = runFail(['facet', 'onlyname'], home);
+  assert.notEqual(r.status, 0);
+  assert.deepEqual(exp.readLog(exp.paths(home)), []);
+});
+test('ability 未知類型 → 報錯退出、不崩潰', () => {
+  const home = tmpHome();
+  const r = runFail(['ability', '不存在類型'], home);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /未知能力類型/);
+  assert.doesNotMatch(r.stderr, /TypeError/);
+});
+test('report 無 --since → 檔名與內容一致為本月', () => {
+  const home = tmpHome();
+  run(['task', 'x', '--type', '除錯', '--dungeon', 'demo'], home);
+  const out = run(['report'], home);
+  assert.match(out, /report-本月\.md/);
+  assert.ok(fs.existsSync(path.join(exp.paths(home).viewsDir, 'report-本月.md')));
+});
+test('safeName: 阻擋路徑穿越', () => {
+  assert.equal(exp.safeName('../../etc'), '____etc');
+  assert.equal(exp.safeName('a/b\\c'), 'a_b_c');
+});
+test('dungeon 路徑穿越輸入 → 檔案仍在 views 內', () => {
+  const home = tmpHome();
+  run(['facet', 'demo', 'x'], home);
+  run(['dungeon', '../../evil'], home);
+  const p = exp.paths(home);
+  // 不應在 base 之上產生 evil.md
+  assert.ok(!fs.existsSync(path.join(p.base, '..', '..', 'evil.md')));
+  // 應在 views 內以安全檔名落地
+  const files = fs.readdirSync(p.viewsDir);
+  assert.ok(files.some((f) => f.startsWith('dungeon-') && f.endsWith('.md')));
 });

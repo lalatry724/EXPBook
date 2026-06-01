@@ -255,6 +255,10 @@ function addEvent(kind, reason, { type, dungeon } = {}, p = paths()) {
 }
 
 // ---- 檢視輔助 ----
+function safeName(s) {
+  // 防路徑穿越：去掉分隔符與 ..，僅保留檔名安全字元
+  return String(s).replace(/[\/\\]/g, '_').replace(/\.\./g, '_').replace(/[:*?"<>|]/g, '_');
+}
 function writeView(p, file, content, summary) {
   ensureBase(p);
   const full = path.join(p.viewsDir, file);
@@ -278,16 +282,22 @@ const HELP = `EXP 指令
   類型：${ABILITIES.join(' / ')}`;
 
 // ---- CLI dispatch ----
+function die(msg) { console.error(msg); process.exit(1); }
+function need(val, msg) { if (!val) die(msg); return val; }
+
 function main(argv) {
   const cmd = argv[0];
   const { pos, flags } = parseFlags(argv.slice(1));
   const dgn = () => flags.dungeon || dungeonFromCwd();
   switch (cmd) {
     case 'init': ensureBase(); persist(paths()); console.log('EXP 已初始化'); break;
-    case 'task': addEvent('task', pos[0], { type: flags.type, dungeon: dgn() }); break;
-    case 'lesson': addEvent('lesson', pos[0], { type: flags.type, dungeon: dgn() }); break;
-    case 'fail': addEvent('fail', pos[0], { type: flags.type, dungeon: dgn() }); break;
-    case 'facet': addEvent('facet', pos[1], { dungeon: pos[0] }); break;
+    case 'task': addEvent('task', need(pos[0], '請提供事由：task "<事由>" --type <類型>'), { type: flags.type, dungeon: dgn() }); break;
+    case 'lesson': addEvent('lesson', need(pos[0], '請提供教訓：lesson "<教訓>"'), { type: flags.type, dungeon: dgn() }); break;
+    case 'fail': addEvent('fail', need(pos[0], '請提供失敗筆記：fail "<筆記>"'), { type: flags.type, dungeon: dgn() }); break;
+    case 'facet':
+      need(pos[0], '請提供副本與面向：facet <副本> "<面向>"');
+      addEvent('facet', need(pos[1], '請提供探明面向：facet <副本> "<面向>"'), { dungeon: pos[0] });
+      break;
     case 'status': {
       const p = paths(); const s = persist(p);
       console.log(`→ STATUS.md（主線 Lv${levelFor(s.global.exp)} EXP ${s.global.exp}）`);
@@ -302,19 +312,22 @@ function main(argv) {
       break;
     }
     case 'dungeon': {
-      const p = paths(); const name = pos[0];
-      writeView(p, `dungeon-${name}.md`, renderDungeon(readLog(p), computeState(readLog(p)), name));
+      const p = paths(); const name = need(pos[0], '請提供副本名：dungeon <副本>');
+      const evs = readLog(p);
+      writeView(p, `dungeon-${safeName(name)}.md`, renderDungeon(evs, computeState(evs), name));
       break;
     }
     case 'ability': {
       const p = paths();
-      writeView(p, 'ability.md', renderAbility(readLog(p), computeState(readLog(p)), pos[0]));
+      if (pos[0] && !ABILITIES.includes(pos[0])) die(`未知能力類型：${pos[0]}（可用：${ABILITIES.join(' / ')}）`);
+      const evs = readLog(p);
+      writeView(p, 'ability.md', renderAbility(evs, computeState(evs), pos[0]));
       break;
     }
     case 'report': {
-      const p = paths(); const label = flags.since || '期間';
-      const range = parseSince(flags.since || '本月');
-      writeView(p, `report-${label}.md`, renderReport(readLog(p), range, label));
+      const p = paths(); const spec = flags.since || '本月';
+      const range = parseSince(spec);
+      writeView(p, `report-${safeName(spec)}.md`, renderReport(readLog(p), range, spec));
       break;
     }
     case 'rebuild': {
@@ -335,7 +348,7 @@ module.exports = {
   parseSince, filterEvents,
   renderStatus, renderHistory, renderDungeon, renderAbility, renderReport,
   dungeonFromCwd, nearDup, parseFlags, addEvent, persist,
-  historyLines, writeView,
+  historyLines, writeView, safeName,
 };
 
 if (require.main === module) main(process.argv.slice(2));
