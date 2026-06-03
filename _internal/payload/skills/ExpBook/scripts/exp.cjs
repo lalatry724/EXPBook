@@ -4,10 +4,12 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-// ---- 常數 ----
-const LEVEL_STEP = 500;
-const EXP_OF = { task: 100, lesson: 1, facet: 20, fail: 0 };
-const ABILITIES = ['除錯', '架構', '實作', '重構', '研究', '工具', '知識'];
+// ---- 常數（冒險者公會制）----
+const LEVEL_STEP = 1000;
+const EXP_OF = { task: 200, lesson: 20, chore: 1, fail: 1, regress: 1 };
+const KIND_LABEL = { task: '任務', lesson: '心法', chore: '練功', fail: '敗戰', regress: '常錯' };
+const DEFAULT_DUNGEON = '日常訓練(雜項)';                 // 未指明地城時的預設
+const DEFAULT_SKILLS = ['除錯', '架構', '實作', '重構', '研究', '工具', '知識']; // 面板恆顯示；可自由新增其他技能 tag
 
 // ---- 路徑 ----
 function resolveHome() {
@@ -55,24 +57,28 @@ function readLog(p = paths()) {
     .split('\n').filter(Boolean).map((l) => JSON.parse(l));
 }
 
-// ---- computeState ----
+// ---- computeState（三層：冒險者 global + 地城 dungeons + 技能 skills）----
+function eventSkills(e) {
+  if (Array.isArray(e.skills)) return e.skills;
+  if (e.type) return [e.type]; // 向後相容：舊事件的 type 視為單一技能
+  return [];
+}
 function applyEvent(state, e) {
   const amt = EXP_OF[e.kind] ?? 0;
-  if (e.kind === 'fail') { state.updated = e.ts; return; }
-  if (e.kind !== 'facet') {
-    state.global.exp += amt;
-    if (e.type && state.abilities[e.type]) state.abilities[e.type].exp += amt;
-  }
+  state.global.exp += amt;
   if (e.dungeon) {
-    const d = state.dungeons[e.dungeon] || (state.dungeons[e.dungeon] = { exp: 0, facets: [] });
+    const d = state.dungeons[e.dungeon] || (state.dungeons[e.dungeon] = { exp: 0 });
     d.exp += amt;
-    if (e.kind === 'facet' && e.reason) d.facets.push(e.reason);
+  }
+  for (const s of eventSkills(e)) {
+    const sk = state.skills[s] || (state.skills[s] = { exp: 0 });
+    sk.exp += amt;
   }
   state.updated = e.ts;
 }
 function computeState(events) {
-  const state = { global: { exp: 0 }, abilities: {}, dungeons: {}, updated: null };
-  for (const a of ABILITIES) state.abilities[a] = { exp: 0 };
+  const state = { global: { exp: 0 }, dungeons: {}, skills: {}, updated: null };
+  for (const s of DEFAULT_SKILLS) state.skills[s] = { exp: 0 }; // 7 技能恆在
   for (const e of events) applyEvent(state, e);
   return state;
 }
@@ -111,43 +117,34 @@ function filterEvents(events, f = {}) {
     if (f.from && e.ts < f.from) return false;
     if (f.to && e.ts > f.to) return false;
     if (f.dungeon && e.dungeon !== f.dungeon) return false;
-    if (f.type && e.type !== f.type) return false;
+    if (f.skill && !eventSkills(e).includes(f.skill)) return false;
     if (f.kind && e.kind !== f.kind) return false;
     return true;
   });
 }
 
 // ---- 渲染器 ----
-function bar(into, step, width = 8) {
-  const n = Math.round((into / step) * width);
-  return '▓'.repeat(n) + '░'.repeat(width - n);
-}
-function expDeltaOf(e) { return e.kind === 'fail' ? 0 : (EXP_OF[e.kind] ?? 0); }
-function deltaLabel(e) {
-  if (e.kind === 'fail') return '✗   ';
-  return '+' + String(expDeltaOf(e)).padEnd(3);
-}
-function kindTag(e) {
-  if (e.kind === 'facet') return '面向';
-  if (e.kind === 'lesson') return '教訓';
-  return e.type || '—';
+function expDeltaOf(e) { return EXP_OF[e.kind] ?? 0; }
+function deltaLabel(e) { return '+' + String(expDeltaOf(e)).padEnd(3); }
+function kindTag(e) { return KIND_LABEL[e.kind] || e.kind; }
+function skillTag(e) { const s = eventSkills(e); return s.length ? `{${s.join('·')}} ` : ''; }
+function lvLine(name, exp) {
+  const p = progressFor(exp);
+  return `  ${name} LV${p.lv} (${p.into}/${p.step}) Total:${exp}\n`;
 }
 
 function renderStatus(state) {
   const g = progressFor(state.global.exp);
-  let out = `# EXP 玩家面板\n\n`;
-  out += `主線　Lv${g.lv}　EXP ${state.global.exp}　${bar(g.into, g.step)} ${g.into}/${g.step} 到 Lv${g.lv + 1}\n\n`;
-  out += `能力\n`;
-  for (const a of ABILITIES) {
-    const p = progressFor(state.abilities[a].exp);
-    out += `  ${a} Lv${p.lv} ${bar(p.into, p.step)}\n`;
-  }
-  out += `\n副本\n`;
-  for (const [name, d] of Object.entries(state.dungeons)) {
-    const lv = levelFor(d.exp);
-    out += `  【${name}】Lv${lv}　EXP ${d.exp}　已探明 ${d.facets.length} 項\n`;
-    for (const f of d.facets.slice(-5)) out += `    - ${f}\n`;
-  }
+  let out = `# EXP 玩家面板（冒險者公會）\n\n`;
+  out += `冒險者　LV${g.lv} (${g.into}/${g.step}) Total:${state.global.exp}\n\n`;
+  out += `地城（專案）\n`;
+  const dungeons = Object.entries(state.dungeons).sort((a, b) => b[1].exp - a[1].exp);
+  if (!dungeons.length) out += `  （尚無）\n`;
+  for (const [name, d] of dungeons) out += lvLine(`【${name}】`, d.exp);
+  out += `\n技能（能力）\n`;
+  const extras = Object.keys(state.skills).filter((k) => !DEFAULT_SKILLS.includes(k));
+  for (const s of DEFAULT_SKILLS) out += lvLine(s, (state.skills[s] || { exp: 0 }).exp);
+  for (const s of extras.sort((a, b) => state.skills[b].exp - state.skills[a].exp)) out += lvLine(s, state.skills[s].exp);
   out += `\n更新時間：${state.updated || '—'}\n`;
   return out;
 }
@@ -161,43 +158,37 @@ function renderHistory(events, f = {}) {
   const rows = historyLines(events, f);
   let out = `# EXP 歷程`;
   const cond = [
-    f.dungeon && `副本=${f.dungeon}`,
-    f.type && `類型=${f.type}`,
+    f.dungeon && `地城=${f.dungeon}`,
+    f.skill && `技能=${f.skill}`,
     f.kind && `kind=${f.kind}`,
     f.since && `since=${f.since}`,
   ].filter(Boolean);
   out += cond.length ? `（${cond.join('，')}）\n\n` : `\n\n`;
   for (const e of rows) {
-    out += `${e.ts.slice(0, 16)}  ${deltaLabel(e)}  [${kindTag(e)}]  (${e.dungeon || '—'})  ${e.reason}\n`;
+    out += `${e.ts.slice(0, 16)}  ${deltaLabel(e)}  [${kindTag(e)}]  (${e.dungeon || '—'})  ${skillTag(e)}${e.reason}\n`;
   }
   out += `\n共 ${rows.length} 筆\n`;
   return out;
 }
 
 function renderDungeon(events, state, name) {
-  const d = state.dungeons[name] || { exp: 0, facets: [] };
-  let out = `# 副本報告：${name}\n\n`;
-  out += `Lv${levelFor(d.exp)}　EXP ${d.exp}　已探明 ${d.facets.length} 項\n\n## 探明面向\n`;
-  for (const f of d.facets) out += `- ${f}\n`;
-  out += `\n## 事件\n`;
+  const d = state.dungeons[name] || { exp: 0 };
+  const p = progressFor(d.exp);
+  let out = `# 地城報告：${name}\n\n`;
+  out += `LV${p.lv} (${p.into}/${p.step}) Total:${d.exp}\n\n## 事件\n`;
   for (const e of historyLines(events, { dungeon: name, limit: 50 })) {
-    out += `${e.ts.slice(0, 16)}  ${deltaLabel(e)}  [${kindTag(e)}]  ${e.reason}\n`;
+    out += `${e.ts.slice(0, 16)}  ${deltaLabel(e)}  [${kindTag(e)}]  ${skillTag(e)}${e.reason}\n`;
   }
   return out;
 }
 
-function renderAbility(events, state, type) {
-  if (type) {
-    let out = `# 能力報告：${type} Lv${levelFor(state.abilities[type].exp)}（EXP ${state.abilities[type].exp}）\n\n`;
-    for (const e of historyLines(events, { type, limit: 50 })) {
-      out += `${e.ts.slice(0, 16)}  ${deltaLabel(e)}  (${e.dungeon || '—'})  ${e.reason}\n`;
-    }
-    return out;
-  }
-  let out = `# 能力分布\n\n`;
-  for (const a of ABILITIES) {
-    const p = progressFor(state.abilities[a].exp);
-    out += `${a} Lv${p.lv}　EXP ${state.abilities[a].exp}　${bar(p.into, p.step)}\n`;
+function renderSkill(events, state, name) {
+  const s = state.skills[name] || { exp: 0 };
+  const p = progressFor(s.exp);
+  let out = `# 技能報告：${name}\n\n`;
+  out += `LV${p.lv} (${p.into}/${p.step}) Total:${s.exp}\n\n## 事件\n`;
+  for (const e of historyLines(events, { skill: name, limit: 50 })) {
+    out += `${e.ts.slice(0, 16)}  ${deltaLabel(e)}  [${kindTag(e)}]  (${e.dungeon || '—'})  ${e.reason}\n`;
   }
   return out;
 }
@@ -206,20 +197,19 @@ function renderReport(events, range, label) {
   const rows = filterEvents(events, range);
   const count = (k) => rows.filter((e) => e.kind === k).length;
   const expSum = rows.reduce((s, e) => s + expDeltaOf(e), 0);
-  const byType = {}; const byDun = {};
+  const byDun = {}; const bySkill = {};
   for (const e of rows) {
-    if (e.kind === 'task' && e.type) byType[e.type] = (byType[e.type] || 0) + 1;
     if (e.dungeon) byDun[e.dungeon] = (byDun[e.dungeon] || 0) + 1;
+    for (const s of eventSkills(e)) bySkill[s] = (bySkill[s] || 0) + 1;
   }
   const fmtMap = (m) => Object.entries(m).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join('、') || '—';
   let out = `# ${label || '期間'}彙總 ${range.from.slice(0, 10)} ~ ${range.to.slice(0, 10)}\n`;
-  out += `完成任務 ${count('task')}｜教訓 ${count('lesson')}｜面向 ${count('facet')}｜失敗 ${count('fail')}｜共 +${expSum} EXP\n`;
-  out += `依類型：${fmtMap(byType)}\n依副本：${fmtMap(byDun)}\n`;
+  out += `任務 ${count('task')}｜心法 ${count('lesson')}｜練功 ${count('chore')}｜敗戰 ${count('fail')}｜常錯 ${count('regress')}｜共 +${expSum} EXP\n`;
+  out += `依地城：${fmtMap(byDun)}\n依技能：${fmtMap(bySkill)}\n`;
   return out;
 }
 
 // ---- 寫入指令 ----
-function dungeonFromCwd(cwd = process.cwd()) { return path.basename(cwd); }
 function normName(s) { return s.toLowerCase().replace(/^[\d.\-_]+/, ''); }
 function nearDup(name, existing) {
   if (existing.includes(name)) return null;
@@ -234,17 +224,21 @@ function parseFlags(argv) {
   }
   return { pos, flags };
 }
+function parseSkills(flags) {
+  const raw = [flags.skill, flags.type].filter(Boolean).join(','); // --type 為舊別名
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+}
 function persist(p) {
   const state = computeState(readLog(p));
   writeState(state, p);
   fs.writeFileSync(p.statusFile, renderStatus(state));
   return state;
 }
-function buildEvent(kind, reason, { type, dungeon } = {}) {
+function buildEvent(kind, reason, { dungeon, skills } = {}) {
   const ev = { ts: now(), kind, reason };
-  if (type) ev.type = type;
   if (dungeon) ev.dungeon = dungeon;
-  ev.exp = kind === 'fail' ? 0 : (EXP_OF[kind] ?? 0);
+  if (skills && skills.length) ev.skills = skills;
+  ev.exp = EXP_OF[kind] ?? 0;
   return ev;
 }
 
@@ -260,7 +254,7 @@ function readPending(p = paths()) {
 function flushPending(p = paths()) {
   const items = readPending(p);
   if (!items.length) return 0;
-  for (const it of items) appendEvent(buildEvent(it.kind, it.reason, { type: it.type, dungeon: it.dungeon }), p);
+  for (const it of items) appendEvent(buildEvent(it.kind, it.reason, { dungeon: it.dungeon, skills: it.skills }), p);
   persist(p);
   fs.writeFileSync(p.pendingFile, '');
   return items.length;
@@ -286,16 +280,17 @@ function removeEvents({ last, ts, match }, p = paths()) {
   return { removed: toRemove, kept };
 }
 
-function addEvent(kind, reason, { type, dungeon } = {}, p = paths()) {
-  const ev = buildEvent(kind, reason, { type, dungeon });
+function addEvent(kind, reason, { dungeon, skills } = {}, p = paths()) {
+  const ev = buildEvent(kind, reason, { dungeon, skills });
   if (dungeon) {
     const dup = nearDup(dungeon, Object.keys(readState(p).dungeons || {}));
-    if (dup) process.stderr.write(`⚠ 副本「${dungeon}」近似既有「${dup}」，確認是否同一個\n`);
+    if (dup) process.stderr.write(`⚠ 地城「${dungeon}」近似既有「${dup}」，確認是否同一個\n`);
   }
   appendEvent(ev, p);
   const state = persist(p);
   const g = progressFor(state.global.exp);
-  console.log(`✓ ${kind} ${ev.exp ? '+' + ev.exp : '✗'}｜主線 Lv${g.lv} (${state.global.exp})｜${reason}`);
+  const sk = (skills && skills.length) ? `｜技能 ${skills.join('·')}` : '';
+  console.log(`✓ ${KIND_LABEL[kind] || kind} +${ev.exp}｜冒險者 Lv${g.lv} (${state.global.exp})｜地城 ${dungeon}${sk}｜${reason}`);
 }
 
 // ---- 檢視輔助 ----
@@ -310,24 +305,25 @@ function writeView(p, file, content, summary) {
   console.log(`→ views/${file}${summary ? '（' + summary + '）' : ''}`);
 }
 
-const HELP = `ExpBook 指令
-  寫入：
-    task   "<事由>" --type <類型> [--dungeon <副本>]   完成任務 +100
-    lesson "<教訓>" [--type <類型>] [--dungeon <副本>]  教訓 +1
-    facet  <副本> "<探明面向>"                          副本 +20
-    fail   "<失敗筆記>" [--type ..] [--dungeon ..]      只記歷程，exp 0
+const HELP = `ExpBook 指令（冒險者公會制；冒險者等級 + 地城(專案) + 技能(能力)；門檻 ${LEVEL_STEP}/級）
+  寫入（未給 --dungeon → 預設地城「${DEFAULT_DUNGEON}」；--skill 選填、可多項逗號分隔）：
+    task    "<事由>"        [--dungeon <地城>] [--skill <技能,..>]   任務 +200
+    lesson  "<心得>"        [--dungeon ..] [--skill ..]            心法 +20
+    chore   "<做了什麼>"    [--dungeon ..] [--skill ..]            練功 +1
+    fail    "<敗因>"        [--dungeon ..] [--skill ..]            敗戰 +1
+    regress "<重犯的已知錯>" [--dungeon ..] [--skill ..]           常錯 +1
   檢視（產報告檔，只回指標）：
     status                     → STATUS.md
-    history [--dungeon|--type|--kind|--since|--limit]  → views/history.md
-    dungeon <副本>              → views/dungeon-<副本>.md
-    ability [<類型>]            → views/ability.md
+    history [--dungeon|--skill|--kind|--since|--limit]  → views/history.md
+    dungeon <地城>             → views/dungeon-<地城>.md
+    skill <技能>               → views/skill-<技能>.md
     report --since <今日|本週|本月|YYYY-MM-DD[..YYYY-MM-DD]>  → views/report-<期間>.md
   暫存/沖刷（hook 用）：
-    stage --kind <task|lesson|facet|fail> "<事由>" [--type ..] [--dungeon ..]   暫存到 _pending
+    stage --kind <task|lesson|chore|fail|regress> "<事由>" [--dungeon ..] [--skill ..]   暫存到 _pending
     flush                      把 _pending 全部沖進 log（Stop hook 每輪呼叫）
   維運：rebuild ｜ init ｜ help
     remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除事件並重建 state
-  類型：${ABILITIES.join(' / ')}`;
+  預設 7 技能：${DEFAULT_SKILLS.join(' / ')}（可自由新增其他技能 tag）`;
 
 // ---- CLI dispatch ----
 function die(msg) { console.error(msg); process.exit(1); }
@@ -336,40 +332,37 @@ function need(val, msg) { if (!val) die(msg); return val; }
 function main(argv) {
   const cmd = argv[0];
   const { pos, flags } = parseFlags(argv.slice(1));
-  const dgn = () => flags.dungeon || dungeonFromCwd();
+  const opt = () => ({ dungeon: flags.dungeon || DEFAULT_DUNGEON, skills: parseSkills(flags) });
   switch (cmd) {
     case 'init': ensureBase(); persist(paths()); console.log('EXP 已初始化'); break;
-    case 'task': addEvent('task', need(pos[0], '請提供事由：task "<事由>" --type <類型>'), { type: flags.type, dungeon: dgn() }); break;
-    case 'lesson': addEvent('lesson', need(pos[0], '請提供教訓：lesson "<教訓>"'), { type: flags.type, dungeon: dgn() }); break;
-    case 'fail': addEvent('fail', need(pos[0], '請提供失敗筆記：fail "<筆記>"'), { type: flags.type, dungeon: dgn() }); break;
-    case 'facet':
-      need(pos[0], '請提供副本與面向：facet <副本> "<面向>"');
-      addEvent('facet', need(pos[1], '請提供探明面向：facet <副本> "<面向>"'), { dungeon: pos[0] });
-      break;
+    case 'task': addEvent('task', need(pos[0], '請提供事由：task "<事由>"'), opt()); break;
+    case 'lesson': addEvent('lesson', need(pos[0], '請提供心得：lesson "<心得>"'), opt()); break;
+    case 'chore': addEvent('chore', need(pos[0], '請提供事由：chore "<做了什麼>"'), opt()); break;
+    case 'fail': addEvent('fail', need(pos[0], '請提供敗因：fail "<敗因>"'), opt()); break;
+    case 'regress': addEvent('regress', need(pos[0], '請提供常錯：regress "<重犯的已知錯>"'), opt()); break;
     case 'status': {
       const p = paths(); const s = persist(p);
-      console.log(`→ STATUS.md（主線 Lv${levelFor(s.global.exp)} EXP ${s.global.exp}）`);
+      console.log(`→ STATUS.md（冒險者 Lv${levelFor(s.global.exp)} EXP ${s.global.exp}）`);
       break;
     }
     case 'history': {
       const p = paths();
-      const f = { dungeon: flags.dungeon, type: flags.type, kind: flags.kind, limit: flags.limit ? Number(flags.limit) : undefined, since: flags.since };
+      const f = { dungeon: flags.dungeon, skill: flags.skill, kind: flags.kind, limit: flags.limit ? Number(flags.limit) : undefined, since: flags.since };
       if (flags.since) Object.assign(f, parseSince(flags.since));
       const rows = historyLines(readLog(p), f);
       writeView(p, 'history.md', renderHistory(readLog(p), f), `${rows.length} 筆`);
       break;
     }
     case 'dungeon': {
-      const p = paths(); const name = need(pos[0], '請提供副本名：dungeon <副本>');
+      const p = paths(); const name = need(pos[0], '請提供地城名：dungeon <地城>');
       const evs = readLog(p);
       writeView(p, `dungeon-${safeName(name)}.md`, renderDungeon(evs, computeState(evs), name));
       break;
     }
-    case 'ability': {
-      const p = paths();
-      if (pos[0] && !ABILITIES.includes(pos[0])) die(`未知能力類型：${pos[0]}（可用：${ABILITIES.join(' / ')}）`);
+    case 'skill': {
+      const p = paths(); const name = need(pos[0], '請提供技能名：skill <技能>');
       const evs = readLog(p);
-      writeView(p, 'ability.md', renderAbility(evs, computeState(evs), pos[0]));
+      writeView(p, `skill-${safeName(name)}.md`, renderSkill(evs, computeState(evs), name));
       break;
     }
     case 'report': {
@@ -379,9 +372,9 @@ function main(argv) {
       break;
     }
     case 'stage': {
-      if (!['task', 'lesson', 'facet', 'fail'].includes(flags.kind)) die('stage 需 --kind task|lesson|facet|fail');
+      if (!['task', 'lesson', 'chore', 'fail', 'regress'].includes(flags.kind)) die('stage 需 --kind task|lesson|chore|fail|regress');
       const reason = need(pos[0], 'stage 需事由：stage --kind task "<事由>"');
-      stagePending({ kind: flags.kind, reason, type: flags.type, dungeon: dgn() });
+      stagePending({ kind: flags.kind, reason, dungeon: flags.dungeon || DEFAULT_DUNGEON, skills: parseSkills(flags) });
       console.log(`✎ staged ${flags.kind}｜${reason}`);
       break;
     }
@@ -396,13 +389,13 @@ function main(argv) {
       const opts = { last: ('last' in flags) && flags.last !== 'false', ts: flags.ts, match: flags.match };
       const { removed } = removeEvents(opts, p);
       if (!removed.length) { console.log('（無符合項目）'); break; }
-      for (const e of removed) console.log(`✗ removed  ${e.ts}  ${e.kind} ${e.exp ? '+' + e.exp : ''}｜${e.reason}`);
+      for (const e of removed) console.log(`✗ removed  ${e.ts}  ${e.kind} +${e.exp ?? 0}｜${e.reason}`);
       console.log(`共移除 ${removed.length} 筆`);
       break;
     }
     case 'rebuild': {
       const p = paths(); const s = persist(p);
-      console.log(`已從 log 重建 state（主線 EXP ${s.global.exp}）`);
+      console.log(`已從 log 重建 state（冒險者 EXP ${s.global.exp}）`);
       break;
     }
     case 'help': console.log(HELP); break;
@@ -411,13 +404,13 @@ function main(argv) {
 }
 
 module.exports = {
-  LEVEL_STEP, EXP_OF, ABILITIES,
+  LEVEL_STEP, EXP_OF, KIND_LABEL, DEFAULT_DUNGEON, DEFAULT_SKILLS,
   resolveHome, paths, levelFor, progressFor,
-  fmtTs, now, ensureBase, appendEvent, readLog,
+  fmtTs, now, ensureBase, appendEvent, readLog, eventSkills,
   applyEvent, computeState, writeState, readState,
-  parseSince, filterEvents,
-  renderStatus, renderHistory, renderDungeon, renderAbility, renderReport,
-  dungeonFromCwd, nearDup, parseFlags, addEvent, persist,
+  parseSince, filterEvents, parseSkills,
+  renderStatus, renderHistory, renderDungeon, renderSkill, renderReport,
+  nearDup, parseFlags, addEvent, persist,
   historyLines, writeView, safeName,
   buildEvent, stagePending, readPending, flushPending, removeEvents,
 };
