@@ -6,7 +6,7 @@ const os = require('os');
 
 // ---- 常數（冒險者公會制）----
 const LEVEL_STEP = 1000;
-const EXP_OF = { task: 200, lesson: 20, chore: 1, fail: 1, regress: 1 };
+const EXP_OF = { task: 200, lesson: 20, chore: 1, fail: 1, regress: 1 }; // 預設值；config.json 可覆寫（見 loadConfig）
 const KIND_LABEL = { task: '任務', lesson: '心法', chore: '練功', fail: '敗戰', regress: '常錯' };
 const DEFAULT_DUNGEON = '日常訓練(雜項)';                 // 未指明地城時的預設
 const DEFAULT_SKILLS = ['除錯', '架構', '實作', '重構', '研究', '工具', '知識']; // 面板恆顯示；可自由新增其他技能 tag
@@ -23,8 +23,26 @@ function paths(base = resolveHome()) {
     statusFile: path.join(base, 'STATUS.md'),
     viewsDir: path.join(base, 'views'),
     pendingFile: path.join(base, '_pending.jsonl'),
+    lastFlushFile: path.join(base, '_last_flush.txt'),
+    configFile: path.join(base, 'config.json'),
   };
 }
+
+// ---- 設定覆寫：使用者可在 ~/.claude/expbook/config.json 調整各 kind 的 EXP 數值 ----
+// 格式：{ "exp_of": { "task": 150, "lesson": 30, ... } }；只覆寫已知 kind，其餘沿用預設。
+// 注意：只影響「之後」新入帳的事件；歷史事件已把當時 EXP 存進 e.exp，不被回溯改動。
+function loadConfig(p = paths()) {
+  try {
+    const c = JSON.parse(fs.readFileSync(p.configFile, 'utf8'));
+    if (c && c.exp_of && typeof c.exp_of === 'object') {
+      for (const k of Object.keys(EXP_OF)) {
+        if (typeof c.exp_of[k] === 'number') EXP_OF[k] = c.exp_of[k];
+      }
+    }
+    return c || {};
+  } catch { return {}; }
+}
+loadConfig(); // 載入模組時即套用使用者覆寫（若 config.json 存在）
 
 // ---- 等級數學 ----
 function levelFor(exp) { return Math.floor(exp / LEVEL_STEP) + 1; }
@@ -64,7 +82,7 @@ function eventSkills(e) {
   return [];
 }
 function applyEvent(state, e) {
-  const amt = EXP_OF[e.kind] ?? 0;
+  const amt = (typeof e.exp === 'number') ? e.exp : (EXP_OF[e.kind] ?? 0); // 優先用入帳當時存的值，rate 改動不回溯
   state.global.exp += amt;
   if (e.dungeon) {
     const d = state.dungeons[e.dungeon] || (state.dungeons[e.dungeon] = { exp: 0 });
@@ -124,7 +142,7 @@ function filterEvents(events, f = {}) {
 }
 
 // ---- 渲染器 ----
-function expDeltaOf(e) { return EXP_OF[e.kind] ?? 0; }
+function expDeltaOf(e) { return (typeof e.exp === 'number') ? e.exp : (EXP_OF[e.kind] ?? 0); }
 function deltaLabel(e) { return '+' + String(expDeltaOf(e)).padEnd(3); }
 function kindTag(e) { return KIND_LABEL[e.kind] || e.kind; }
 function skillTag(e) { const s = eventSkills(e); return s.length ? `{${s.join('·')}} ` : ''; }
@@ -251,12 +269,27 @@ function readPending(p = paths()) {
   if (!fs.existsSync(p.pendingFile)) return [];
   return fs.readFileSync(p.pendingFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
 }
+function flushSummaryText(evs) {
+  const total = evs.reduce((s, e) => s + (e.exp ?? 0), 0);
+  const ts = (evs[0] && evs[0].ts ? evs[0].ts : now()).slice(0, 16);
+  let out = `# 本輪 EXP 入帳（${ts}）  共 +${total} EXP\n`;
+  for (const e of evs) {
+    out += `  +${String(e.exp ?? 0).padEnd(3)} [${KIND_LABEL[e.kind] || e.kind}] (${e.dungeon || '—'}) ${skillTag(e)}${e.reason}\n`;
+  }
+  return out;
+}
 function flushPending(p = paths()) {
   const items = readPending(p);
   if (!items.length) return 0;
-  for (const it of items) appendEvent(buildEvent(it.kind, it.reason, { dungeon: it.dungeon, skills: it.skills }), p);
+  const evs = [];
+  for (const it of items) {
+    const ev = buildEvent(it.kind, it.reason, { dungeon: it.dungeon, skills: it.skills });
+    appendEvent(ev, p);
+    evs.push(ev);
+  }
   persist(p);
   fs.writeFileSync(p.pendingFile, '');
+  try { ensureBase(p); fs.writeFileSync(p.lastFlushFile, flushSummaryText(evs)); } catch {} // 本輪入帳摘要，供 lastflush / 下輪查看
   return items.length;
 }
 
@@ -319,10 +352,12 @@ const HELP = `ExpBook 指令（冒險者公會制；冒險者等級 + 地城(專
     skill <技能>               → views/skill-<技能>.md
     report --since <今日|本週|本月|YYYY-MM-DD[..YYYY-MM-DD]>  → views/report-<期間>.md
   暫存/沖刷（hook 用）：
-    stage --kind <task|lesson|chore|fail|regress> "<事由>" [--dungeon ..] [--skill ..]   暫存到 _pending
-    flush                      把 _pending 全部沖進 log（Stop hook 每輪呼叫）
+    stage --kind <task|lesson|chore|fail|regress> "<事由>" [--dungeon ..] [--skill ..]   暫存到 _pending（回顯 +EXP）
+    flush                      把 _pending 全部沖進 log（Stop hook 每輪呼叫）；印本輪入帳明細
+    lastflush                  顯示最近一次 flush 的「本輪 EXP 入帳」明細（什麼原因加了多少）
   維運：rebuild ｜ init ｜ help
-    remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除事件並重建 state
+    remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除事件並重建 state（調整/回退某筆 EXP）
+  調整 EXP 數值：編輯 ${path.join(resolveHome(), 'config.json')}  例 {"exp_of":{"task":150,"lesson":30}}（只影響之後新事件）
   預設 7 技能：${DEFAULT_SKILLS.join(' / ')}（可自由新增其他技能 tag）`;
 
 // ---- CLI dispatch ----
@@ -375,12 +410,25 @@ function main(argv) {
       if (!['task', 'lesson', 'chore', 'fail', 'regress'].includes(flags.kind)) die('stage 需 --kind task|lesson|chore|fail|regress');
       const reason = need(pos[0], 'stage 需事由：stage --kind task "<事由>"');
       stagePending({ kind: flags.kind, reason, dungeon: flags.dungeon || DEFAULT_DUNGEON, skills: parseSkills(flags) });
-      console.log(`✎ staged ${flags.kind}｜${reason}`);
+      console.log(`✎ staged ${KIND_LABEL[flags.kind] || flags.kind} (+${EXP_OF[flags.kind] ?? 0} EXP)｜${reason}`);
       break;
     }
     case 'flush': {
-      const n = flushPending(paths());
-      console.log(`✓ flushed ${n} 筆`);
+      const p = paths();
+      const before = readState(p).global.exp;
+      const n = flushPending(p);
+      if (n > 0) {
+        try { process.stdout.write(fs.readFileSync(p.lastFlushFile, 'utf8')); } catch {}
+        console.log(`✓ flushed ${n} 筆｜冒險者 EXP ${before} → ${readState(p).global.exp}`);
+      } else {
+        console.log('✓ flushed 0 筆');
+      }
+      break;
+    }
+    case 'lastflush': {
+      const p = paths();
+      if (fs.existsSync(p.lastFlushFile)) process.stdout.write(fs.readFileSync(p.lastFlushFile, 'utf8'));
+      else console.log('（尚無本輪入帳紀錄）');
       break;
     }
     case 'remove': {
@@ -412,7 +460,8 @@ module.exports = {
   renderStatus, renderHistory, renderDungeon, renderSkill, renderReport,
   nearDup, parseFlags, addEvent, persist,
   historyLines, writeView, safeName,
-  buildEvent, stagePending, readPending, flushPending, removeEvents,
+  buildEvent, stagePending, readPending, flushPending, flushSummaryText, removeEvents,
+  loadConfig, expDeltaOf,
 };
 
 if (require.main === module) main(process.argv.slice(2));

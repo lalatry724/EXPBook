@@ -44,8 +44,16 @@ description: Agent 成長歷程系統（ExpBook，冒險者公會制）。用 ex
 | 檢視玩家面板 / show ExpBook status / 現在幾級 | `status` |
 | ExpBook help / 有哪些指令 | `help` |
 | 看歷程 / 我最近做了什麼 | `history [篩選]` |
+| 這輪加了什麼 EXP / 剛剛為什麼加分 | `lastflush` |
 | 本週做了什麼 / 週報 / 這個月幹了啥 | `report --since 本週\|本月` |
 | 看 X 地城 / 這專案做過什麼 | `dungeon X` |
 | 看 X 技能 / 我這能力練多少 | `skill X` |
 
-除 `help` 外，檢視指令都會產報告檔；AI 只轉述 stdout 那行指標。
+除 `help`、`lastflush` 外，檢視指令都會產報告檔；AI 只轉述 stdout 那行指標。
+
+## EXP 增減透明 + 可調整
+- **入帳當下可見**：`stage` 回顯 `✎ staged 心法 (+20 EXP)｜事由`；`flush` 印「本輪 EXP 入帳」明細（每筆 `+Δ [kind] (地城) {技能} 事由` + 總和）並寫入 `~/.claude/expbook/_last_flush.txt`。
+- **隨時回查本輪入帳**：`lastflush`（讀 `_last_flush.txt`，列出剛剛什麼原因加了多少）。
+- **調整每種 kind 的 EXP 數值**：建 `~/.claude/expbook/config.json`，例 `{"exp_of":{"task":150,"lesson":30}}`。**只影響之後新事件**——歷史事件把當時 EXP 存進 `e.exp`，改 rate 不回溯竄改。
+- **校正/回退某筆 EXP**：`remove --last｜--ts "<時間戳>"｜--match "<事由片段>"`（移除後自動重算 state）。
+> Stop hook 的 flush 是靜默的（hook stdout 不露出）；要「看見」入帳，靠 `stage` 回顯（AI 轉達）或 `lastflush` 主動查。
