@@ -34,7 +34,9 @@ description: Agent 成長歷程系統（ExpBook，冒險者公會制）。用 ex
 回合中判斷該記時，用 **stage 暫存**；**Stop hook 每輪結束自動 flush** 進 log。
 - `node scripts/exp.cjs stage --kind <task|lesson|chore|fail|regress> "<可讀事由>" [--dungeon <地城>] [--skill <技能,..>]`
 - 也可直接用 `task/lesson/chore/fail/regress`（立即落 log，不經 stage）。
-- 事由品質：寫「做了什麼、結果如何」（例「修好 Arena 戰鬥結算 off-by-one」），禁止「修了東西」。
+- **事由品質（詳細，禁摘要）**：reason 要讓未來回溯能還原當時情境，**不可一兩句帶過**。至少涵蓋：① 具體做了什麼（逐項，非「修了東西」）② 涉及檔案／模組／函式 ③ 結果如何（成功／失敗／部署狀態；有 commit 附 hash）④ 為何而做（觸發原因／需求背景，非顯而易見時）。禁止籠統摘要（「修好 bug」「調整介面」「更新程式」）。
+  - 好例：「修好 Arena 戰鬥結算 off-by-one：結算 hp 多扣 1（damage.lua:42 floor→round），改回後 E2E smoke 3 場通過，commit a1b2c3」
+  - 壞例：「修好 Arena bug」
 - 屬於某專案的工作務必加 `--dungeon <專案>`；該練的能力加 `--skill`（可多項）。
 - **安全網**：Stop hook 偵測到「有新 commit 但本輪沒記」會在下一輪提醒；看到提醒請補 stage。
 
