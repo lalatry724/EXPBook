@@ -11,6 +11,27 @@ const KIND_LABEL = { task: '任務', lesson: '心法', chore: '練功', fail: '�
 const DEFAULT_DUNGEON = '日常訓練(雜項)';                 // 未指明地城時的預設
 const DEFAULT_SKILLS = ['除錯', '架構', '實作', '重構', '研究', '工具', '知識']; // 面板恆顯示；可自由新增其他技能 tag
 
+// ---- 技能分類（純 render-time 分組；不改 log.jsonl 原始 tag，僅面板彙總）----
+// 結構：群組 → 分類 → 成員 tag。面板顯示「分類小計」，原始細 tag 保留為明細（history/report 不受影響）。
+// 要新增/搬動分類：改這張表即可，純渲染可回溯。未列入任何分類的 tag 自動歸「未分類」群，提示待歸。
+const SKILL_GROUPS = [
+  { group: '核心', cats: [
+    { name: '除錯', members: ['除錯', 'debugging', 'systematic-debugging'] },
+    { name: '架構', members: ['架構', '規格設計', 'model-lock', 'done-gate'] },
+    { name: '實作', members: ['實作', 'frontend', 'chatLog', 'payload封裝', 'skill格式'] },
+    { name: '重構', members: ['重構', 'refactor'] },
+    { name: '研究', members: ['研究', '程式碼研究', '跨工具比較'] },
+    { name: '知識', members: ['知識', '版號治理'] },
+  ] },
+  { group: '工具鏈', cats: [
+    { name: '版控', members: ['git', 'git-rebase', 'git-am', 'patch合併'] },
+    { name: '部署', members: ['deploy', 'vercel'] },
+    { name: '測試自動化', members: ['playwright', 'playwright-verify', 'crawler'] },
+    { name: '環境設定', members: ['Windows-env', '設定檔', 'settings合併', 'Node', 'hook'] },
+    { name: '工具·其它', members: ['工具', '工具開發', 'security'] },
+  ] },
+];
+
 // ---- 路徑 ----
 function resolveHome() {
   return process.env.EXPBOOK_HOME || path.join(os.homedir(), '.claude', 'expbook');
@@ -150,6 +171,32 @@ function lvLine(name, exp) {
   const p = progressFor(exp);
   return `  ${name} LV${p.lv} (${p.into}/${p.step}) Total:${exp}\n`;
 }
+function lvLineAt(name, exp, indent, detail) {
+  const p = progressFor(exp);
+  return `${indent}${name} LV${p.lv} (${p.into}/${p.step}) Total:${exp}${detail ? `  ‹${detail}›` : ''}\n`;
+}
+// 把 state.skills 依 SKILL_GROUPS 彙總成分類小計；未列入任何分類的 tag 收進「未分類」群。
+function categorizeSkills(state) {
+  const known = new Set();
+  const groups = SKILL_GROUPS.map((g) => ({
+    group: g.group,
+    cats: g.cats.map((c) => {
+      let exp = 0; const present = [];
+      for (const m of c.members) {
+        known.add(m);
+        const e = (state.skills[m] || {}).exp || 0;
+        exp += e;
+        if (e > 0) present.push(m); // 只把有分數的成員列為明細
+      }
+      return { name: c.name, exp, members: present };
+    }).sort((a, b) => b.exp - a.exp),
+  }));
+  const uncategorized = Object.entries(state.skills)
+    .filter(([k, v]) => (v.exp || 0) > 0 && !known.has(k))
+    .sort((a, b) => b[1].exp - a[1].exp)
+    .map(([k, v]) => ({ name: k, exp: v.exp }));
+  return { groups, uncategorized };
+}
 
 function renderStatus(state) {
   const g = progressFor(state.global.exp);
@@ -159,10 +206,16 @@ function renderStatus(state) {
   const dungeons = Object.entries(state.dungeons).sort((a, b) => b[1].exp - a[1].exp);
   if (!dungeons.length) out += `  （尚無）\n`;
   for (const [name, d] of dungeons) out += lvLine(`【${name}】`, d.exp);
-  out += `\n技能（能力）\n`;
-  const extras = Object.keys(state.skills).filter((k) => !DEFAULT_SKILLS.includes(k));
-  for (const s of DEFAULT_SKILLS) out += lvLine(s, (state.skills[s] || { exp: 0 }).exp);
-  for (const s of extras.sort((a, b) => state.skills[b].exp - state.skills[a].exp)) out += lvLine(s, state.skills[s].exp);
+  out += `\n技能（能力 · 依分類小計，‹…› 為原始細項明細）\n`;
+  const { groups, uncategorized } = categorizeSkills(state);
+  for (const g of groups) {
+    out += `  〔${g.group}〕\n`;
+    for (const c of g.cats) out += lvLineAt(c.name, c.exp, '    ', c.members.join('·'));
+  }
+  if (uncategorized.length) {
+    out += `  〔未分類〕← 建議補進 SKILL_GROUPS\n`;
+    for (const u of uncategorized) out += lvLineAt(u.name, u.exp, '    ', '');
+  }
   out += `\n更新時間：${state.updated || '—'}\n`;
   return out;
 }
