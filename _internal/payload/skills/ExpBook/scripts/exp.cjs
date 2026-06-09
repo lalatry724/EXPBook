@@ -34,7 +34,7 @@ const SKILL_GROUPS = [
 
 // ---- 路徑 ----
 function resolveHome() {
-  return process.env.EXPBOOK_HOME || path.join(os.homedir(), '.claude', 'expbook');
+  return process.env.EXPBOOK_HOME || path.join(os.homedir(), '.gemini', 'expbook');
 }
 function paths(base = resolveHome()) {
   return {
@@ -49,7 +49,7 @@ function paths(base = resolveHome()) {
   };
 }
 
-// ---- 設定覆寫：使用者可在 ~/.claude/expbook/config.json 調整各 kind 的 EXP 數值 ----
+// ---- 設定覆寫：使用者可在 ~/.gemini/expbook/config.json 調整各 kind 的 EXP 數值 ----
 // 格式：{ "exp_of": { "task": 150, "lesson": 30, ... } }；只覆寫已知 kind，其餘沿用預設。
 // 注意：只影響「之後」新入帳的事件；歷史事件已把當時 EXP 存進 e.exp，不被回溯改動。
 function loadConfig(p = paths()) {

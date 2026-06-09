@@ -63,7 +63,7 @@ ExpBook 是 **Agent（AI）的成長歷程系統**：把每輪工作量化成經
 
 ## 4. 資料儲存
 
-根目錄：`~/.claude/expbook/`（可用環境變數 `EXPBOOK_HOME` 覆寫）。
+根目錄：`~/.gemini/expbook/`（可用環境變數 `EXPBOOK_HOME` 覆寫）。
 
 | 檔案 | 角色 |
 |------|------|
@@ -156,4 +156,4 @@ remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除�
 | v2.3 | 2026-06-08 | 事由品質升級：由「禁『修了東西』」改為**四要素強制詳述**（① 做了什麼逐項 ② 涉及檔案/模組/函式 ③ 結果+commit ④ 為何而做），明令「不可一兩句帶過」+ 好/壞範例。同步 §6.3 + SKILL 自律記錄章 |
 | v2.4 | 2026-06-09 | 技能分類（§2.1）：技能 tag 易長成扁平長列（曾累 35 個），面板改「分類小計」。`exp.cjs` 加 `SKILL_GROUPS` 表（核心6+工具鏈5）+ `categorizeSkills()` render-time 分組；純渲染非破壞（log.jsonl 原 tag 保留為明細，`‹a·b·c›` 顯示成員）；未列入 tag 自動歸「未分類」群；守恆＝分類小計總和=原始技能槽位總和 |
 
-> 遷移每步皆有 `log.jsonl.bak-*` 備份留底（收於 `~/.claude/expbook/backups/`）。
+> 遷移每步皆有 `log.jsonl.bak-*` 備份留底（收於 `~/.gemini/expbook/backups/`）。

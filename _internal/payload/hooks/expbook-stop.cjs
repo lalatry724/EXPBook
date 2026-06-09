@@ -10,7 +10,7 @@ let input = {};
 try { input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch {}
 const cwd = input.cwd || process.cwd();
 
-const expPath = path.join(os.homedir(), '.claude', 'skills', 'ExpBook', 'scripts', 'exp.cjs');
+const expPath = path.join(os.homedir(), '.gemini', 'skills', 'ExpBook', 'scripts', 'exp.cjs');
 let exp;
 try { exp = require(expPath); } catch { process.exit(0); } // ExpBook 未安裝 → 不干擾
 
