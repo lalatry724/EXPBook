@@ -718,8 +718,12 @@ function main(argv) {
     case 'fail': addEvent('fail', need(pos[0], '請提供敗因：fail "<敗因>"'), opt()); break;
     case 'regress': addEvent('regress', need(pos[0], '請提供常錯：regress "<重犯的已知錯>"'), opt()); break;
     case 'status': {
-      const p = paths(); const s = persist(p);
-      console.log(`→ STATUS.md（冒險者 Lv${levelFor(s.global.exp)} EXP ${s.global.exp}）`);
+      const p = paths();
+      try { deriveAchievements(p); } catch (e) { console.error(`（derive 略過：${e.message}）`); } // 衍生失敗不擋面板
+      const s = persist(p);
+      const d = readDerived(p);
+      const tail = d ? `｜指揮Lv${d.commandLevel} 殺敵Lv${d.slayLevel}` : '';
+      console.log(`→ STATUS.md（冒險者 Lv${levelFor(s.global.exp)} EXP ${s.global.exp}${tail}）`);
       break;
     }
     case 'history': {
@@ -765,6 +769,8 @@ function main(argv) {
       } else {
         console.log('✓ flushed 0 筆');
       }
+      try { deriveAchievements(p); } catch (e) { console.error(`（derive 略過：${e.message}）`); }
+      persist(p); // 刷新 STATUS.md 面板（含 v2.5 一行面板 + 燃料儀表板）
       break;
     }
     case 'lastflush': {
@@ -787,9 +793,8 @@ function main(argv) {
       const p = paths();
       const r = deriveAchievements(p);
       const d = r.derived;
-      const 億 = (n) => (n / 1e8).toFixed(2) + '億';
       console.log(`✓ derive 完成 → ${p.achievementsFile}`);
-      console.log(`計費等效 ${億(d.billable)}｜總處理量 ${億(d.totalProcessed)}｜成本 $${d.costUSD.toFixed(0)}`);
+      console.log(`計費等效 ${fmtYi(d.billable, 2)}｜總處理量 ${fmtYi(d.totalProcessed, 1)}｜成本 ${fmtUSD(d.costUSD)}`);
       console.log(`對話 ${d.conversations} → 指揮Lv${d.commandLevel}｜打字 ${(d.typedChars/10000).toFixed(1)}萬字(code ${(d.codePct*100).toFixed(0)}%) → 殺敵Lv${d.slayLevel}`);
       console.log(`委託 D${d.tierCount.D}/C${d.tierCount.C}/B${d.tierCount.B}/A${d.tierCount.A}/S${d.tierCount.S}｜精英分 ${d.elitePoints}｜streak ${d.streak.current}(PR${d.streak.longest})`);
       console.log(`使用時間 ${d.activeHours.toFixed(1)}hr｜窗 ${d.window.files} 檔 ${d.window.messages} 訊息`);
