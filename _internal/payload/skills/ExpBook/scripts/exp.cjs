@@ -32,6 +32,26 @@ const SKILL_GROUPS = [
   ] },
 ];
 
+// ---- v2.5 衍生層常數 ----
+const BILLABLE = (u) => (u.input_tokens||0) + (u.output_tokens||0) + (u.cache_creation_input_tokens||0); // 排除 cache_read
+// 委託界線（計費等效 token；design §4.1，錨真實分位 p25/中位/p75/p90）
+const QUEST_TIERS = [
+  { tier: 'D', lo: 0,        hi: 170000 },
+  { tier: 'C', lo: 170000,   hi: 330000 },
+  { tier: 'B', lo: 330000,   hi: 760000 },
+  { tier: 'A', lo: 760000,   hi: 1800000 },
+  { tier: 'S', lo: 1800000,  hi: Infinity },
+];
+const ELITE_WEIGHT = { D: 1, C: 2, B: 3, A: 5, S: 8 }; // 精英分權重
+function projectsRoot() { return path.join(os.homedir(), '.claude', 'projects'); }
+const ACTIVE_GAP_MS = 15 * 60000;           // 使用時間：相鄰訊息 gap<15 分才累加
+// 定價（每百萬 token，2026-06；查 claude-api skill 為準，變動只重算展示欄、不影響等級）
+const PRICING = {
+  opus:   { in: 5,  out: 25, cc: 6.25, cr: 0.5 },
+  sonnet: { in: 3,  out: 15, cc: 3.75, cr: 0.3 },
+  haiku:  { in: 1,  out: 5,  cc: 1.25, cr: 0.1 },
+};
+
 // ---- 路徑 ----
 function resolveHome() {
   return process.env.EXPBOOK_HOME || path.join(os.homedir(), '.claude', 'expbook');
@@ -46,6 +66,7 @@ function paths(base = resolveHome()) {
     pendingFile: path.join(base, '_pending.jsonl'),
     lastFlushFile: path.join(base, '_last_flush.txt'),
     configFile: path.join(base, 'config.json'),
+    achievementsFile: path.join(base, 'achievements.json'),
   };
 }
 
@@ -310,6 +331,7 @@ function buildEvent(kind, reason, { dungeon, skills } = {}) {
   if (dungeon) ev.dungeon = dungeon;
   if (skills && skills.length) ev.skills = skills;
   ev.exp = EXP_OF[kind] ?? 0;
+  ev.cwd = process.cwd(); // #029: 記錄觸發 event 的專案資料夾，與 dungeon tag 並存
   return ev;
 }
 
@@ -408,10 +430,215 @@ const HELP = `ExpBook 指令（冒險者公會制；冒險者等級 + 地城(專
     stage --kind <task|lesson|chore|fail|regress> "<事由>" [--dungeon ..] [--skill ..]   暫存到 _pending（回顯 +EXP）
     flush                      把 _pending 全部沖進 log（Stop hook 每輪呼叫）；印本輪入帳明細
     lastflush                  顯示最近一次 flush 的「本輪 EXP 入帳」明細（什麼原因加了多少）
-  維運：rebuild ｜ init ｜ help
+  維運：rebuild ｜ derive ｜ init ｜ help
+    derive                     掃 transcript 重算衍生指標 → achievements.json
     remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除事件並重建 state（調整/回退某筆 EXP）
   調整 EXP 數值：編輯 ${path.join(resolveHome(), 'config.json')}  例 {"exp_of":{"task":150,"lesson":30}}（只影響之後新事件）
   預設 7 技能：${DEFAULT_SKILLS.join(' / ')}（可自由新增其他技能 tag）`;
+
+// ---- v2.5 衍生層：等級公式 ----
+function commandLevel(conversations) { return Math.floor(Math.sqrt(Math.max(0, conversations) / 4)); }
+function slayLevel(typedChars) { return Math.floor(Math.sqrt(Math.max(0, typedChars) / 600)); }
+function _todayStr() { return now().slice(0, 10); }
+
+// 連勤計算（護符抵斷；活躍日 = 有 task event 的日期）
+function computeStreak(log, todayStr) {
+  const days = new Set(log.filter((e) => e.kind === 'task').map((e) => e.ts.slice(0, 10)));
+  if (!days.size) return { current: 0, longest: 0 };
+  const dayMs = 86400000;
+  const toMs = (s) => Date.parse(s + 'T00:00:00Z');
+  const activeSet = new Set([...days].map(toMs));
+  // current：從 today 往回，只有活躍日 increment current，護符允許跨越單日空缺
+  let current = 0, tokens = 0, cursor = toMs(todayStr);
+  while (true) {
+    if (activeSet.has(cursor)) { current++; cursor -= dayMs; }
+    else {
+      const earned = Math.floor(current / 7) + 1;
+      if (tokens < earned) { tokens++; cursor -= dayMs; }
+      else break;
+    }
+    if (current > 100000) break;
+  }
+  // longest：對排序活躍日做同規則連鏈
+  const sorted = [...activeSet].sort((a, b) => a - b);
+  let longest = 0, run = 0, tok2 = 0, prev = null;
+  for (const ms of sorted) {
+    if (prev == null) { run = 1; tok2 = 0; }
+    else {
+      const gapDays = Math.round((ms - prev) / dayMs);
+      if (gapDays === 1) run++;
+      else if (gapDays === 2 && tok2 < Math.floor(run / 7) + 1) { tok2++; run++; }
+      else { run = 1; tok2 = 0; }
+    }
+    if (run > longest) longest = run;
+    prev = ms;
+  }
+  return { current, longest };
+}
+
+// ---- v2.5 衍生層：掃 transcript 原始彙總 ----
+function _txtOf(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    let s = '';
+    for (const b of content) if (b && b.type === 'text' && typeof b.text === 'string') s += b.text;
+    return s;
+  }
+  return '';
+}
+function _isToolResult(content) {
+  return Array.isArray(content) && content.some((b) => b && b.type === 'tool_result');
+}
+function _emptyScan() {
+  return { tok: { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 }, byModel: {}, billable: 0, totalProcessed: 0,
+    messages: [], tsList: [], perSession: [], perDay: {}, userTurns: 0, userChars: 0, codeChars: 0,
+    msgCount: 0, fileCount: 0, minTs: null, maxTs: null };
+}
+function scanTranscripts(root = projectsRoot()) {
+  const tok = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+  const byModel = {};
+  const messages = [];                 // {ts:ms, billable} 供委託區間 join（僅含有 usage 的訊息）
+  const tsList = [];                   // 所有訊息 timestamp（ms）供使用時間
+  const perSession = [];               // 每檔計費等效
+  const perDay = {};                   // 'YYYY-MM-DD' → 計費等效
+  let userTurns = 0, userChars = 0, codeChars = 0, msgCount = 0, fileCount = 0;
+  let minTs = null, maxTs = null;
+  if (!fs.existsSync(root)) return _emptyScan();
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { walk(p); continue; }
+      if (!e.name.endsWith('.jsonl')) continue;
+      fileCount++;
+      let sessBill = 0;
+      for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
+        if (!line.trim()) continue;
+        let o; try { o = JSON.parse(line); } catch { continue; }
+        const msg = o.message || o;
+        const role = msg.role || o.type;
+        const u = msg.usage;
+        const tsRaw = o.timestamp;
+        const tsMs = tsRaw ? Date.parse(tsRaw) : null;
+        if (tsMs != null && !Number.isNaN(tsMs)) {
+          tsList.push(tsMs);
+          if (minTs == null || tsMs < minTs) minTs = tsMs;
+          if (maxTs == null || tsMs > maxTs) maxTs = tsMs;
+        }
+        if (u && role === 'assistant') {
+          tok.input += u.input_tokens || 0;
+          tok.output += u.output_tokens || 0;
+          tok.cacheCreation += u.cache_creation_input_tokens || 0;
+          tok.cacheRead += u.cache_read_input_tokens || 0;
+          const m = msg.model || 'unknown';
+          const bm = byModel[m] || (byModel[m] = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 });
+          bm.input += u.input_tokens || 0; bm.output += u.output_tokens || 0;
+          bm.cacheCreation += u.cache_creation_input_tokens || 0; bm.cacheRead += u.cache_read_input_tokens || 0;
+          const b = BILLABLE(u);
+          sessBill += b;
+          if (tsMs != null && !Number.isNaN(tsMs)) { messages.push({ ts: tsMs, billable: b }); perDay[tsRaw.slice(0, 10)] = (perDay[tsRaw.slice(0, 10)] || 0) + b; } // NaN guard 與 tsList 一致：壞 timestamp 不入區間 join
+          msgCount++;
+        }
+        if (role === 'user' && msg.content != null && !_isToolResult(msg.content)) {
+          const t = _txtOf(msg.content);
+          if (t && !t.startsWith('<')) {            // 排除系統注入（startsWith('<') 粗濾）
+            userTurns++; userChars += [...t].length;
+            for (const f of (t.match(/```[\s\S]*?```/g) || [])) codeChars += [...f].length;
+          }
+        }
+      }
+      if (sessBill > 0) perSession.push(sessBill);
+    }
+  };
+  walk(root);
+  const billable = tok.input + tok.output + tok.cacheCreation;
+  return { tok, byModel, billable, totalProcessed: billable + tok.cacheRead,
+    messages, tsList, perSession, perDay, userTurns, userChars, codeChars, // perSession/perDay：Plan 2 分位校準/每日里程碑用
+    msgCount, fileCount, minTs, maxTs };
+}
+
+// 使用時間：相鄰訊息 gap<15 分才累加，回傳小時
+function activeHours(tsList) {
+  const a = tsList.slice().sort((x, y) => x - y);
+  let total = 0;
+  for (let i = 1; i < a.length; i++) { const d = a[i] - a[i - 1]; if (d > 0 && d < ACTIVE_GAP_MS) total += d; }
+  return total / 3600000;
+}
+// 等效成本 $：每 model 各欄 × 單價（model 名以 opus/sonnet/haiku 子字串匹配；未知→不計）
+function costOf(byModel) {
+  let usd = 0;
+  for (const [model, v] of Object.entries(byModel)) {
+    const key = /opus/i.test(model) ? 'opus' : /sonnet/i.test(model) ? 'sonnet' : /haiku/i.test(model) ? 'haiku' : null;
+    if (!key) continue;
+    const pr = PRICING[key];
+    usd += (v.input * pr.in + v.output * pr.out + v.cacheCreation * pr.cc + v.cacheRead * pr.cr) / 1e6;
+  }
+  return usd;
+}
+function classifyTier(billable) {
+  for (const t of QUEST_TIERS) if (billable >= t.lo && billable < t.hi) return t;
+  return QUEST_TIERS[QUEST_TIERS.length - 1];
+}
+// 把 transcript token 依 task event 時間區間歸成委託；回傳每筆 task 對應的委託
+function questsByTaskInterval(scan, log) {
+  const tasks = log.filter((e) => e.kind === 'task')
+    .map((e) => ({ ev: e, ms: Date.parse(e.ts) }))
+    .filter((x) => !Number.isNaN(x.ms))
+    .sort((a, b) => a.ms - b.ms);
+  if (!tasks.length) return [];
+  const quests = tasks.map((t) => ({ ts: t.ev.ts, reason: t.ev.reason, dungeon: t.ev.dungeon || null, billable: 0 }));
+  for (const m of scan.messages) {
+    let idx = -1;
+    for (let i = 0; i < tasks.length; i++) { if (m.ts <= tasks[i].ms) { idx = i; break; } }
+    if (idx >= 0) quests[idx].billable += m.billable;
+  }
+  for (const q of quests) q.tier = classifyTier(q.billable).tier;
+  return quests;
+}
+
+// 衍生指標主函式（log = readLog() 結果；本 Task 只填基礎欄，委託/等級在後續 Task 補在 return base 前）
+function deriveMetrics(scan, log) {
+  const base = {
+    billable: scan.billable,
+    totalProcessed: scan.totalProcessed,
+    flows: { input: scan.tok.input, output: scan.tok.output, cacheCreation: scan.tok.cacheCreation, cacheRead: scan.tok.cacheRead },
+    conversations: scan.userTurns,
+    typedChars: scan.userChars,
+    codeChars: scan.codeChars,
+    codePct: scan.userChars ? scan.codeChars / scan.userChars : 0,
+    activeHours: activeHours(scan.tsList),
+    costUSD: costOf(scan.byModel),
+    window: { from: scan.minTs, to: scan.maxTs, files: scan.fileCount, messages: scan.msgCount },
+  };
+  const quests = questsByTaskInterval(scan, log);
+  const tierCount = { D: 0, C: 0, B: 0, A: 0, S: 0 };
+  let elitePoints = 0;
+  for (const q of quests) { tierCount[q.tier]++; elitePoints += ELITE_WEIGHT[q.tier] || 0; }
+  base.quests = quests;
+  base.tierCount = tierCount;
+  base.elitePoints = elitePoints;
+  base.commandLevel = commandLevel(base.conversations);
+  base.slayLevel = slayLevel(Math.max(0, base.typedChars - base.codeChars));
+  base.streak = computeStreak(log, _todayStr());
+  return base;
+}
+
+// 衍生引擎入口：掃 transcript + log → 算指標 → 寫 achievements.json（衍生快取，可 rebuild 重算）
+// opts.projectsRoot 可注入（測試用）；opts.log 可注入，否則讀 p 的 log.jsonl
+function deriveAchievements(p = paths(), opts = {}) {
+  ensureBase(p);
+  const root = opts.projectsRoot || projectsRoot();
+  const log = opts.log || readLog(p);
+  const scan = scanTranscripts(root);
+  const derived = deriveMetrics(scan, log);
+  const payload = {
+    version: 'v2.5',
+    scanned_at: now(),
+    last_scanned_ts: scan.maxTs != null ? new Date(scan.maxTs).toISOString() : null,
+    derived,
+  };
+  fs.writeFileSync(p.achievementsFile, JSON.stringify(payload, null, 2));
+  return payload;
+}
 
 // ---- CLI dispatch ----
 function die(msg) { console.error(msg); process.exit(1); }
@@ -494,6 +721,18 @@ function main(argv) {
       console.log(`共移除 ${removed.length} 筆`);
       break;
     }
+    case 'derive': {
+      const p = paths();
+      const r = deriveAchievements(p);
+      const d = r.derived;
+      const 億 = (n) => (n / 1e8).toFixed(2) + '億';
+      console.log(`✓ derive 完成 → ${p.achievementsFile}`);
+      console.log(`計費等效 ${億(d.billable)}｜總處理量 ${億(d.totalProcessed)}｜成本 $${d.costUSD.toFixed(0)}`);
+      console.log(`對話 ${d.conversations} → 指揮Lv${d.commandLevel}｜打字 ${(d.typedChars/10000).toFixed(1)}萬字(code ${(d.codePct*100).toFixed(0)}%) → 殺敵Lv${d.slayLevel}`);
+      console.log(`委託 D${d.tierCount.D}/C${d.tierCount.C}/B${d.tierCount.B}/A${d.tierCount.A}/S${d.tierCount.S}｜精英分 ${d.elitePoints}｜streak ${d.streak.current}(PR${d.streak.longest})`);
+      console.log(`使用時間 ${d.activeHours.toFixed(1)}hr｜窗 ${d.window.files} 檔 ${d.window.messages} 訊息`);
+      break;
+    }
     case 'rebuild': {
       const p = paths(); const s = persist(p);
       console.log(`已從 log 重建 state（冒險者 EXP ${s.global.exp}）`);
@@ -515,6 +754,8 @@ module.exports = {
   historyLines, writeView, safeName,
   buildEvent, stagePending, readPending, flushPending, flushSummaryText, removeEvents,
   loadConfig, expDeltaOf,
+  scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, deriveAchievements, // v2.5 衍生層
+  commandLevel, slayLevel, computeStreak, // v2.5 等級公式 + 連勤
 };
 
 if (require.main === module) main(process.argv.slice(2));
