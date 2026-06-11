@@ -27,3 +27,19 @@ test('eliteLevel：累進門檻 cost(n)=round(500×1.2^(n-1))', () => {
   assert.strictEqual(exp.eliteLevel(1100), 2);    // 累 1100 = Lv2（500+600）
   assert.strictEqual(exp.eliteLevel(4318), 5);    // design §2.1 表：Lv5 累 4,318
 });
+
+const LEVEL_STEP = exp.LEVEL_STEP; // 冒險者每級門檻
+function stateAt(lv) { return { global: { exp: (lv - 1) * LEVEL_STEP }, dungeons: {}, skills: {} }; }
+const D = { elitePoints: 5000, commandLevel: 22, slayLevel: 51, totalProcessed: 5.01e9, billable: 2.04e8, costUSD: 3990 };
+
+test('renderPanelLine：LV50 前精英顯示 0（解鎖閘）', () => {
+  const line = exp.renderPanelLine(stateAt(18), D);
+  assert.match(line, /\[等級\] 冒險者18 精英0 指揮22 殺敵51/);
+  assert.match(line, /\[消耗\] 魔力50\.1億\(有效2\.04億\) 金幣\$3,990/);
+});
+
+test('renderPanelLine：LV50 後精英用 eliteLevel 換算', () => {
+  const line = exp.renderPanelLine(stateAt(50), D);
+  assert.match(line, /精英\d+/);
+  assert.doesNotMatch(line.split('指揮')[0], /精英0\b/); // 5000 分 → 精英 > 0
+});

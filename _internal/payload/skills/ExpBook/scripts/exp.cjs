@@ -245,6 +245,15 @@ function categorizeSkills(state) {
   return { groups, uncategorized };
 }
 
+// 一行式四等級面板（design §2.3）：左=會升級的榮譽（成果+投入），右=只增的代價
+function renderPanelLine(state, d) {
+  const advLv = levelFor(state.global.exp);
+  const eliteLv = advLv >= ELITE_UNLOCK_LV ? eliteLevel(d.elitePoints) : 0;
+  const lvs = `[等級] 冒險者${advLv} 精英${eliteLv} 指揮${d.commandLevel} 殺敵${d.slayLevel}`;
+  const cost = `[消耗] 魔力${fmtYi(d.totalProcessed, 1)}(有效${fmtYi(d.billable, 2)}) 金幣${fmtUSD(d.costUSD)}`;
+  return `${lvs}   ${cost}`;
+}
+
 function renderStatus(state) {
   const g = progressFor(state.global.exp);
   let out = `# EXP 玩家面板（冒險者公會）\n\n`;
@@ -783,6 +792,7 @@ module.exports = {
   scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, deriveAchievements, // v2.5 衍生層
   commandLevel, slayLevel, computeStreak, // v2.5 等級公式 + 連勤
   fmtYi, fmtWan, fmtUSD, eliteLevel, // v2.5 顯示層：數字格式 + 精英等級
+  renderPanelLine, // v2.5 一行式四等級面板
 };
 
 if (require.main === module) main(process.argv.slice(2));
