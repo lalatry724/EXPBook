@@ -93,6 +93,7 @@ const ACHIEVEMENTS = [
   // C 委託
   { id: 'first_s',       name: '首級',       rarity: 'N',  cat: 'C 委託', desc: '完成首個 S 級委託',      cond: (c) => c.tiers.S >= 1 },
   { id: 'all_tiers',     name: '全階通吃',   rarity: 'R',  cat: 'C 委託', desc: 'D~S 各至少 1 件',         cond: (c) => c.tiers.D >= 1 && c.tiers.C >= 1 && c.tiers.B >= 1 && c.tiers.A >= 1 && c.tiers.S >= 1 },
+  { id: 's_hunter_10',   name: 'S級獵人',    rarity: 'SR', cat: 'C 委託', desc: '累積 10 個 S 級委託',     cond: (c) => c.tiers.S >= 10 },
   { id: 'dragon_slayer', name: '巨龍討伐者', rarity: 'UR', cat: 'C 委託', desc: '單委託 > 1000 萬 token',  cond: (c) => c.maxQuest > DRAGON_TOKEN },
   // D 代價（負面自嘲）
   { id: 'mage_yi',         name: '億級法師',           rarity: 'R',  cat: 'D 代價', desc: '有效 token 破 1 億',        cond: (c) => c.billable >= 1e8 },

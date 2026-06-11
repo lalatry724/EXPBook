@@ -13,10 +13,10 @@ function D(over = {}) {
 }
 const ST = { global: { exp: 0 }, dungeons: {}, skills: {} };
 
-test('ACHIEVEMENTS 共 24 枚、id 不重複、稀有度合法', () => {
-  assert.strictEqual(exp.ACHIEVEMENTS.length, 24);
+test('ACHIEVEMENTS 共 25 枚、id 不重複、稀有度合法', () => {
+  assert.strictEqual(exp.ACHIEVEMENTS.length, 25);
   const ids = new Set(exp.ACHIEVEMENTS.map((b) => b.id));
-  assert.strictEqual(ids.size, 24);
+  assert.strictEqual(ids.size, 25);
   for (const b of exp.ACHIEVEMENTS) assert.ok(exp.RARITY_RANK[b.rarity], `bad rarity ${b.rarity}`);
 });
 
