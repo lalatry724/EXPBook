@@ -144,6 +144,39 @@ function buildBadgeContext(state, log, d) {
 function evalBadges(ctx) {
   return ACHIEVEMENTS.filter((b) => { try { return !!b.cond(ctx); } catch { return false; } }).map((b) => b.id);
 }
+// 稱號：已解鎖徽章中「最高稀有度 → 同稀有度取最新解鎖 ts」；pin 非空直接覆寫（config.json title_pin）
+function deriveTitle(unlocked, pin) {
+  if (pin) return pin;
+  const ids = Object.keys(unlocked || {});
+  let best = null;
+  for (const id of ids) {
+    const b = badgeById(id); if (!b) continue;
+    const ts = unlocked[id] || '';
+    if (!best) { best = { b, ts }; continue; }
+    const dr = RARITY_RANK[b.rarity] - RARITY_RANK[best.b.rarity];
+    if (dr > 0 || (dr === 0 && ts > best.ts)) best = { b, ts };
+  }
+  return best ? best.b.name : null;
+}
+// 個人 PR records 合併（只進不退，取 max）
+function mergeRecords(prev, d) {
+  const p = prev || {};
+  return {
+    maxDayToken: Math.max(p.maxDayToken || 0, d.maxDayToken || 0),
+    maxDayChars: Math.max(p.maxDayChars || 0, d.maxDayChars || 0),
+    maxQuest: Math.max(p.maxQuest || 0, d.maxQuestBillable || 0),
+    longestStreak: Math.max(p.longestStreak || 0, (d.streak && d.streak.longest) || 0),
+  };
+}
+// 回傳本次刷新的 PR 項（供 flush 即時播報）：[[label, value], ...]
+function recordPRs(prev, next) {
+  const p = prev || {}; const prs = [];
+  if ((next.maxDayToken || 0) > (p.maxDayToken || 0)) prs.push(['單日最高 token', next.maxDayToken]);
+  if ((next.maxDayChars || 0) > (p.maxDayChars || 0)) prs.push(['單日最多字', next.maxDayChars]);
+  if ((next.maxQuest || 0) > (p.maxQuest || 0)) prs.push(['單委託最大', next.maxQuest]);
+  if ((next.longestStreak || 0) > (p.longestStreak || 0)) prs.push(['最長連戰', next.longestStreak]);
+  return prs;
+}
 
 // ---- v2.5 顯示層：數字格式 ----
 function fmtYi(n, dp = 1) { return (Number(n || 0) / 1e8).toFixed(dp) + '億'; }      // token → 億（1 億=100M）
@@ -940,6 +973,7 @@ module.exports = {
   fmtYi, fmtWan, fmtUSD, eliteLevel, // v2.5 顯示層：數字格式 + 精英等級
   renderPanelLine, renderFuelDashboard, // v2.5 一行式四等級面板 + 燃料儀表板
   RARITY_RANK, ACHIEVEMENTS, badgeById, buildBadgeContext, evalBadges, // v2.5 Plan3 徽章
+  deriveTitle, mergeRecords, recordPRs,
 };
 
 if (require.main === module) main(process.argv.slice(2));

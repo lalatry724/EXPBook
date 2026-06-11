@@ -71,3 +71,31 @@ test('F 幽默：浴火重生(連3敗後task)／惜字如金(<10字)／手滑(re
   assert.ok(got.includes('terse'));
   assert.ok(got.includes('butterfinger'));
 });
+
+test('deriveTitle：最高稀有度優先，同稀用最新 ts；pin 覆寫', () => {
+  const unlocked = { first_task: '2026-06-01 10:00:00', slay_25: '2026-06-02 10:00:00', cmd_50: '2026-06-03 10:00:00' };
+  assert.strictEqual(exp.deriveTitle(unlocked, null), '沙場宿將');
+  assert.strictEqual(exp.deriveTitle(unlocked, '自訂頭銜'), '自訂頭銜');
+  assert.strictEqual(exp.deriveTitle({}, null), null);
+});
+
+test('deriveTitle：同稀有度取最新解鎖', () => {
+  const unlocked = { slay_25: '2026-06-01 10:00:00', night_mage: '2026-06-05 10:00:00' };
+  assert.strictEqual(exp.deriveTitle(unlocked, null), '夜術士');
+});
+
+test('mergeRecords 取 max；recordPRs 回傳刷新項', () => {
+  const prev = { maxDayToken: 100, maxDayChars: 50, maxQuest: 0, longestStreak: 3 };
+  const d = { maxDayToken: 80, maxDayChars: 90, maxQuestBillable: 2e7, streak: { current: 1, longest: 5 } };
+  const merged = exp.mergeRecords(prev, d);
+  assert.strictEqual(merged.maxDayToken, 100);
+  assert.strictEqual(merged.maxDayChars, 90);
+  assert.strictEqual(merged.maxQuest, 2e7);
+  assert.strictEqual(merged.longestStreak, 5);
+  const prs = exp.recordPRs(prev, merged);
+  const keys = prs.map((x) => x[0]);
+  assert.ok(keys.includes('單日最多字'));
+  assert.ok(keys.includes('單委託最大'));
+  assert.ok(keys.includes('最長連戰'));
+  assert.ok(!keys.includes('單日最高 token'));
+});
