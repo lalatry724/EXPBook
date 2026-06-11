@@ -387,10 +387,13 @@ function persist(p) {
   return state;
 }
 function buildEvent(kind, reason, { dungeon, skills } = {}) {
-  const ev = { ts: now(), kind, reason };
+  // log.jsonl key 順序：ts → dungeon → kind → skills → exp → reason → else(cwd)
+  const ev = { ts: now() };
   if (dungeon) ev.dungeon = dungeon;
+  ev.kind = kind;
   if (skills && skills.length) ev.skills = skills;
   ev.exp = EXP_OF[kind] ?? 0;
+  ev.reason = reason;
   ev.cwd = process.cwd(); // #029: 記錄觸發 event 的專案資料夾，與 dungeon tag 並存
   return ev;
 }
