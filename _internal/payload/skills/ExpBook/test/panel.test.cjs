@@ -18,3 +18,12 @@ test('fmtUSD：四捨五入 + 千分位', () => {
   assert.strictEqual(exp.fmtUSD(3990.4), '$3,990');
   assert.strictEqual(exp.fmtUSD(0), '$0');
 });
+
+test('eliteLevel：累進門檻 cost(n)=round(500×1.2^(n-1))', () => {
+  assert.strictEqual(exp.eliteLevel(0), 0);
+  assert.strictEqual(exp.eliteLevel(499), 0);     // 未達 Lv1 門檻 500
+  assert.strictEqual(exp.eliteLevel(500), 1);     // 累 500 = Lv1
+  assert.strictEqual(exp.eliteLevel(1099), 1);    // 未達 Lv2 累 1100
+  assert.strictEqual(exp.eliteLevel(1100), 2);    // 累 1100 = Lv2（500+600）
+  assert.strictEqual(exp.eliteLevel(4318), 5);    // design §2.1 表：Lv5 累 4,318
+});

@@ -65,6 +65,19 @@ function fmtYi(n, dp = 1) { return (Number(n || 0) / 1e8).toFixed(dp) + '億'; }
 function fmtWan(chars) { return (Number(chars || 0) / 10000).toFixed(1) + '萬字'; }  // 字元 → 萬字
 function fmtUSD(n) { return '$' + Math.round(Number(n || 0)).toLocaleString('en-US'); }
 
+// 精英分 → 精英等級：cost(n)=round(ELITE_BASE×ELITE_RATIO^(n-1))，累計達標升級（無硬上限）
+function eliteLevel(points) {
+  let p = Number(points || 0);
+  if (p <= 0) return 0;
+  let lv = 0, acc = 0;
+  while (lv < 100000) {                                   // 防爆上限
+    const next = Math.round(ELITE_BASE * Math.pow(ELITE_RATIO, lv)); // 升到 lv+1 的門檻
+    if (acc + next > p) break;
+    acc += next; lv++;
+  }
+  return lv;
+}
+
 // ---- 路徑 ----
 function resolveHome() {
   return process.env.EXPBOOK_HOME || path.join(os.homedir(), '.gemini', 'expbook');
@@ -769,7 +782,7 @@ module.exports = {
   loadConfig, expDeltaOf,
   scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, deriveAchievements, // v2.5 衍生層
   commandLevel, slayLevel, computeStreak, // v2.5 等級公式 + 連勤
-  fmtYi, fmtWan, fmtUSD, // v2.5 顯示層：數字格式
+  fmtYi, fmtWan, fmtUSD, eliteLevel, // v2.5 顯示層：數字格式 + 精英等級
 };
 
 if (require.main === module) main(process.argv.slice(2));
