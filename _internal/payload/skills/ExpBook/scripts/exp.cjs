@@ -60,6 +60,90 @@ const BOOK_CHARS = 100000;    // 10 萬字 = 1 本（design §4.3 #027）
 const BOOK_RATE = 0.7;        // 計費等效 × 0.7 字/token
 const FLOW_LABEL = { input: '你新送進', output: 'AI寫出', cacheCreation: '首次建快取', cacheRead: '重複讀歷史' }; // design §4.2
 
+// ---- v2.5 Plan3 四元素常數 ----
+const RARITY_RANK = { N: 1, R: 2, SR: 3, UR: 4, LR: 5 };
+const DRAGON_TOKEN = 1e7;
+const REGRESS_BADGE_MIN = 3;
+const TERSE_MAX_CHARS = 10;
+const TALKATIVE_MIN = 50;
+const NIGHT_END = 5;
+const MORNING_START = 5, MORNING_END = 8;
+const MARATHON_HR = 6;
+const SLEEPLESS_HR = 12;
+const STREAK_CELEBRATE = [7, 30];
+const RARE_LINES = [
+  '⋯⋯系統深處傳來一聲微弱的嘆息。',
+  '一隻像素貓悄悄走過你的終端機。',
+  '你彷彿聽見遠方傳來編譯成功的鐘聲。',
+  '螢幕角落閃過一行不存在的 log，再看已消失。',
+];
+
+// ---- v2.5 Plan3 徽章表（宣告式，比照 SKILL_GROUPS；cond 純比較）----
+const ACHIEVEMENTS = [
+  // A 戰績
+  { id: 'first_task',   name: '初試啼聲', rarity: 'N',  cat: 'A 戰績', desc: '完成首個任務',        cond: (c) => c.taskCount >= 1 },
+  { id: 'veteran_100',  name: '百戰之身', rarity: 'R',  cat: 'A 戰績', desc: '累積 100 個任務',      cond: (c) => c.taskCount >= 100 },
+  { id: 'master_1000',  name: '千錘百鍊', rarity: 'SR', cat: 'A 戰績', desc: '累積 1000 個任務',     cond: (c) => c.taskCount >= 1000 },
+  { id: 'legend_10000', name: '萬卷功成', rarity: 'LR', cat: 'A 戰績', desc: '累積 10000 個任務',    cond: (c) => c.taskCount >= 10000 },
+  // B 投入
+  { id: 'cmd_10',  name: '見習指揮官', rarity: 'N',  cat: 'B 投入', desc: '指揮等級達 10', cond: (c) => c.commandLevel >= 10 },
+  { id: 'cmd_50',  name: '沙場宿將',   rarity: 'SR', cat: 'B 投入', desc: '指揮等級達 50', cond: (c) => c.commandLevel >= 50 },
+  { id: 'slay_25', name: '筆鋒如刃',   rarity: 'R',  cat: 'B 投入', desc: '殺敵等級達 25', cond: (c) => c.slayLevel >= 25 },
+  { id: 'slay_50', name: '一字千軍',   rarity: 'SR', cat: 'B 投入', desc: '殺敵等級達 50', cond: (c) => c.slayLevel >= 50 },
+  // C 委託
+  { id: 'first_s',       name: '首級',       rarity: 'N',  cat: 'C 委託', desc: '完成首個 S 級委託',      cond: (c) => c.tiers.S >= 1 },
+  { id: 'all_tiers',     name: '全階通吃',   rarity: 'R',  cat: 'C 委託', desc: 'D~S 各至少 1 件',         cond: (c) => c.tiers.D >= 1 && c.tiers.C >= 1 && c.tiers.B >= 1 && c.tiers.A >= 1 && c.tiers.S >= 1 },
+  { id: 'dragon_slayer', name: '巨龍討伐者', rarity: 'UR', cat: 'C 委託', desc: '單委託 > 1000 萬 token',  cond: (c) => c.maxQuest > DRAGON_TOKEN },
+  // D 代價（負面自嘲）
+  { id: 'mage_yi',         name: '億級法師',           rarity: 'R',  cat: 'D 代價', desc: '有效 token 破 1 億',        cond: (c) => c.billable >= 1e8 },
+  { id: 'burn_1k',         name: '燒錢如焚',           rarity: 'SR', cat: 'D 代價', desc: '等效成本破 $1000',          cond: (c) => c.costUSD >= 1000 },
+  { id: 'burn_5k',         name: '揮金如土',           rarity: 'UR', cat: 'D 代價', desc: '等效成本破 $5000',          cond: (c) => c.costUSD >= 5000 },
+  { id: 'burn_3k_secret',  name: '你知道燒了多少嗎',   rarity: 'SR', cat: 'D 代價', desc: '等效成本破 $3000（隱藏）',  hidden: true, cond: (c) => c.costUSD >= 3000 },
+  // E 習慣
+  { id: 'night_mage',      name: '夜術士',       rarity: 'R',  cat: 'E 習慣', desc: '0–5 點完成任務',   cond: (c) => c.night },
+  { id: 'morning_adv',     name: '晨型冒險者',   rarity: 'R',  cat: 'E 習慣', desc: '5–8 點完成任務',   cond: (c) => c.morning },
+  { id: 'weekend_warrior', name: '假日狂戰士',   rarity: 'R',  cat: 'E 習慣', desc: '週末完成任務',     cond: (c) => c.weekend },
+  { id: 'sleepless',       name: '不眠騎士',     rarity: 'SR', cat: 'E 習慣', desc: '單日使用 > 12 小時', cond: (c) => c.maxDayActiveHours > SLEEPLESS_HR },
+  { id: 'marathon',        name: '馬拉松',       rarity: 'SR', cat: 'E 習慣', desc: '單 session > 6 小時', cond: (c) => c.maxSessionHours > MARATHON_HR },
+  // F 隱藏/幽默
+  { id: 'phoenix',      name: '浴火重生',     rarity: 'R', cat: 'F 幽默', desc: '連 3 敗後達成任務', cond: (c) => c.phoenix },
+  { id: 'terse',        name: '惜字如金',     rarity: 'N', cat: 'F 幽默', desc: '< 10 字完成任務',   cond: (c) => c.terse },
+  { id: 'talkative',    name: '話癆',         rarity: 'N', cat: 'F 幽默', desc: '單日 > 50 次對話',   cond: (c) => c.maxDayConv > TALKATIVE_MIN },
+  { id: 'butterfinger', name: '手滑藝術家',   rarity: 'N', cat: 'F 幽默', desc: '常錯累積 3 次',     cond: (c) => c.regressCount >= REGRESS_BADGE_MIN },
+];
+function badgeById(id) { return ACHIEVEMENTS.find((b) => b.id === id) || null; }
+
+function buildBadgeContext(state, log, d) {
+  const tasks = log.filter((e) => e.kind === 'task');
+  const taskCount = tasks.length;
+  const regressCount = log.filter((e) => e.kind === 'regress').length;
+  let night = false, morning = false, weekend = false, terse = false;
+  for (const t of tasks) {
+    const ts = t.ts || '';
+    const hh = Number(ts.slice(11, 13));
+    if (hh >= 0 && hh < NIGHT_END) night = true;
+    if (hh >= MORNING_START && hh < MORNING_END) morning = true;
+    const dt = new Date(ts.replace(' ', 'T'));
+    if (!Number.isNaN(dt.getTime())) { const wd = dt.getDay(); if (wd === 0 || wd === 6) weekend = true; }
+    if ([...(t.reason || '')].length < TERSE_MAX_CHARS) terse = true;
+  }
+  const ordered = [...log].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  let fails = 0, phoenix = false;
+  for (const e of ordered) {
+    if (e.kind === 'fail') fails++;
+    else if (e.kind === 'task') { if (fails >= 3) phoenix = true; fails = 0; }
+  }
+  return {
+    taskCount, regressCount, night, morning, weekend, terse, phoenix,
+    maxDayConv: d.maxDayConversations || 0, maxDayActiveHours: d.maxDayActiveHours || 0, maxSessionHours: d.maxSessionHours || 0,
+    billable: d.billable || 0, costUSD: d.costUSD || 0, commandLevel: d.commandLevel || 0, slayLevel: d.slayLevel || 0,
+    tiers: d.tierCount || { D: 0, C: 0, B: 0, A: 0, S: 0 }, maxQuest: d.maxQuestBillable || 0,
+  };
+}
+function evalBadges(ctx) {
+  return ACHIEVEMENTS.filter((b) => { try { return !!b.cond(ctx); } catch { return false; } }).map((b) => b.id);
+}
+
 // ---- v2.5 顯示層：數字格式 ----
 function fmtYi(n, dp = 1) { return (Number(n || 0) / 1e8).toFixed(dp) + '億'; }      // token → 億（1 億=100M）
 function fmtWan(chars) { return (Number(chars || 0) / 10000).toFixed(1) + '萬字'; }  // 字元 → 萬字
@@ -854,6 +938,7 @@ module.exports = {
   commandLevel, slayLevel, computeStreak, // v2.5 等級公式 + 連勤
   fmtYi, fmtWan, fmtUSD, eliteLevel, // v2.5 顯示層：數字格式 + 精英等級
   renderPanelLine, renderFuelDashboard, // v2.5 一行式四等級面板 + 燃料儀表板
+  RARITY_RANK, ACHIEVEMENTS, badgeById, buildBadgeContext, evalBadges, // v2.5 Plan3 徽章
 };
 
 if (require.main === module) main(process.argv.slice(2));
