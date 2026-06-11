@@ -63,7 +63,7 @@ ExpBook 是 **Agent（AI）的成長歷程系統**：把每輪工作量化成經
 
 ## 4. 資料儲存
 
-根目錄：`~/.gemini/expbook/`（可用環境變數 `EXPBOOK_HOME` 覆寫）。
+根目錄：所屬 CLI home 的 `expbook/`（由 `exp.cjs:resolveHome()` 從 `__dirname` 推導：Claude→`~/.claude/expbook/`、gemini→`~/.gemini/expbook/`；可用環境變數 `EXPBOOK_HOME` 覆寫）。
 
 | 檔案 | 角色 |
 |------|------|
@@ -157,4 +157,4 @@ remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除�
 | v2.4 | 2026-06-09 | 技能分類（§2.1）：技能 tag 易長成扁平長列（曾累 35 個），面板改「分類小計」。`exp.cjs` 加 `SKILL_GROUPS` 表（核心6+工具鏈5）+ `categorizeSkills()` render-time 分組；純渲染非破壞（log.jsonl 原 tag 保留為明細，`‹a·b·c›` 顯示成員）；未列入 tag 自動歸「未分類」群；守恆＝分類小計總和=原始技能槽位總和 |
 | v2.5 | 2026-06-11 23:46:43 | Mac 相容修復：`exp.cjs` 的 `resolveHome()` 與 `expbook-prompt.cjs`/`expbook-stop.cjs` 載入 `exp.cjs` 的路徑，全改用 `__dirname` 推導所在 CLI home（原寫死 `~/.gemini`）。原 Claude 安裝下：① 兩 hook `require('~/.gemini/.../exp.cjs')` 失敗 → 靜默 `exit(0)`，hook 等同 no-op；② 資料目錄誤落 `~/.gemini/expbook` 而非 `.claude`。改後雙 CLI 各自獨立（`.claude`↔`.gemini`），`EXPBOOK_HOME` 仍可覆寫 |
 
-> 遷移每步皆有 `log.jsonl.bak-*` 備份留底（收於 `~/.gemini/expbook/backups/`）。
+> 遷移每步皆有 `log.jsonl.bak-*` 備份留底（收於該 CLI home 的 `expbook/backups/`：Claude `~/.claude/expbook/backups/`／gemini `~/.gemini/expbook/backups/`）。

@@ -5,7 +5,7 @@ description: Agent 成長歷程系統（ExpBook，冒險者公會制）。用 ex
 
 # ExpBook — Agent 成長歷程系統（冒險者公會制）
 
-腳本：`scripts/exp.cjs`（純 Node，零依賴）。資料在 `~/.gemini/expbook/`（可用 `EXPBOOK_HOME` 覆寫）。完整規格：`doc/SPEC.md`。
+腳本：`scripts/exp.cjs`（純 Node，零依賴）。資料在所屬 CLI home 的 `expbook/` 下（由 `exp.cjs:resolveHome()` 從 `__dirname` 推導：Claude→`~/.claude/expbook/`、gemini→`~/.gemini/expbook/`；可用 `EXPBOOK_HOME` 覆寫）。完整規格：`doc/SPEC.md`。
 （命名：**ExpBook = 系統名**；**EXP = 經驗值單位**。對話一律稱 ExpBook。）
 
 ## 最高原則：厚程式、薄 AI
@@ -54,8 +54,8 @@ description: Agent 成長歷程系統（ExpBook，冒險者公會制）。用 ex
 除 `help`、`lastflush` 外，檢視指令都會產報告檔；AI 只轉述 stdout 那行指標。
 
 ## EXP 增減透明 + 可調整
-- **入帳當下可見**：`stage` 回顯 `✎ staged 心法 (+20 EXP)｜事由`；`flush` 印「本輪 EXP 入帳」明細（每筆 `+Δ [kind] (地城) {技能} 事由` + 總和）並寫入 `~/.gemini/expbook/_last_flush.txt`。
+- **入帳當下可見**：`stage` 回顯 `✎ staged 心法 (+20 EXP)｜事由`；`flush` 印「本輪 EXP 入帳」明細（每筆 `+Δ [kind] (地城) {技能} 事由` + 總和）並寫入 `~/.claude/expbook/_last_flush.txt`（Claude）／`~/.gemini/expbook/_last_flush.txt`（gemini），隨腳本所在 CLI home。
 - **隨時回查本輪入帳**：`lastflush`（讀 `_last_flush.txt`，列出剛剛什麼原因加了多少）。
-- **調整每種 kind 的 EXP 數值**：建 `~/.gemini/expbook/config.json`，例 `{"exp_of":{"task":150,"lesson":30}}`。**只影響之後新事件**——歷史事件把當時 EXP 存進 `e.exp`，改 rate 不回溯竄改。
+- **調整每種 kind 的 EXP 數值**：建 `~/.claude/expbook/config.json`（Claude）／`~/.gemini/expbook/config.json`（gemini），例 `{"exp_of":{"task":150,"lesson":30}}`。**只影響之後新事件**——歷史事件把當時 EXP 存進 `e.exp`，改 rate 不回溯竄改。
 - **校正/回退某筆 EXP**：`remove --last｜--ts "<時間戳>"｜--match "<事由片段>"`（移除後自動重算 state）。
 > Stop hook 的 flush 是靜默的（hook stdout 不露出）；要「看見」入帳，靠 `stage` 回顯（AI 轉達）或 `lastflush` 主動查。
