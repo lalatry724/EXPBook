@@ -79,8 +79,14 @@ function eliteLevel(points) {
 }
 
 // ---- 路徑 ----
+// 資料目錄跟著「本腳本所在的 CLI home」走（.claude 或 .gemini），雙 CLI 各自獨立。
+// 本檔位於 <HOME>/skills/ExpBook/scripts/exp.cjs → 上溯 3 層即 CLI home。
+// EXPBOOK_HOME 環境變數可顯式覆寫（最高優先）。
+function cliHome() {
+  return path.resolve(__dirname, '..', '..', '..');
+}
 function resolveHome() {
-  return process.env.EXPBOOK_HOME || path.join(os.homedir(), '.gemini', 'expbook');
+  return process.env.EXPBOOK_HOME || path.join(cliHome(), 'expbook');
 }
 function paths(base = resolveHome()) {
   return {

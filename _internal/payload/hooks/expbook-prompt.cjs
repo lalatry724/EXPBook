@@ -5,7 +5,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const expPath = path.join(os.homedir(), '.gemini', 'skills', 'ExpBook', 'scripts', 'exp.cjs');
+// 跟著「本 hook 所在的 CLI home」載入 exp.cjs（.claude 或 .gemini），雙 CLI 各自獨立。
+// 本檔位於 <HOME>/hooks/expbook-prompt.cjs → exp.cjs 在 <HOME>/skills/ExpBook/scripts/。
+const expPath = path.join(__dirname, '..', 'skills', 'ExpBook', 'scripts', 'exp.cjs');
 let exp;
 try { exp = require(expPath); } catch { process.exit(0); }
 

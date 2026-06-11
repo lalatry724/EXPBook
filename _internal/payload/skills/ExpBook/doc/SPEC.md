@@ -1,6 +1,6 @@
 # ExpBook 規格書（冒險者公會制）
 
-> 版本：v2.4（2026-06-09）。本檔為**權威規格**；操作指引見 `../SKILL.md`，實作見 `../scripts/exp.cjs`。
+> 版本：v2.5（2026-06-11 23:46:43）。本檔為**權威規格**；操作指引見 `../SKILL.md`，實作見 `../scripts/exp.cjs`。
 > 命名：**ExpBook = 系統名**；**EXP = 經驗值單位**。
 
 ---
@@ -155,5 +155,6 @@ remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除�
 | v2.2 | 2026-06-05 | EXP 透明度 + 可調整：① `lastflush` 指令（查本輪入帳明細）② `flush` 印每筆 `+Δ [kind]` 明細並存 `_last_flush.txt` ③ `stage` 回顯 `+EXP` 數額 ④ `config.json` 覆寫各 kind 的 EXP 數值（只影響之後新事件）⑤ `remove` 補說明（調整/回退某筆） |
 | v2.3 | 2026-06-08 | 事由品質升級：由「禁『修了東西』」改為**四要素強制詳述**（① 做了什麼逐項 ② 涉及檔案/模組/函式 ③ 結果+commit ④ 為何而做），明令「不可一兩句帶過」+ 好/壞範例。同步 §6.3 + SKILL 自律記錄章 |
 | v2.4 | 2026-06-09 | 技能分類（§2.1）：技能 tag 易長成扁平長列（曾累 35 個），面板改「分類小計」。`exp.cjs` 加 `SKILL_GROUPS` 表（核心6+工具鏈5）+ `categorizeSkills()` render-time 分組；純渲染非破壞（log.jsonl 原 tag 保留為明細，`‹a·b·c›` 顯示成員）；未列入 tag 自動歸「未分類」群；守恆＝分類小計總和=原始技能槽位總和 |
+| v2.5 | 2026-06-11 23:46:43 | Mac 相容修復：`exp.cjs` 的 `resolveHome()` 與 `expbook-prompt.cjs`/`expbook-stop.cjs` 載入 `exp.cjs` 的路徑，全改用 `__dirname` 推導所在 CLI home（原寫死 `~/.gemini`）。原 Claude 安裝下：① 兩 hook `require('~/.gemini/.../exp.cjs')` 失敗 → 靜默 `exit(0)`，hook 等同 no-op；② 資料目錄誤落 `~/.gemini/expbook` 而非 `.claude`。改後雙 CLI 各自獨立（`.claude`↔`.gemini`），`EXPBOOK_HOME` 仍可覆寫 |
 
 > 遷移每步皆有 `log.jsonl.bak-*` 備份留底（收於 `~/.gemini/expbook/backups/`）。
