@@ -35,6 +35,32 @@ test('deriveMetrics 算出四分項/對話/打字/時間/成本', () => {
   } finally { fx.rm(root); }
 });
 
+test('classifyTier 依界線分級', () => {
+  assert.strictEqual(exp.classifyTier(100000).tier, 'D');
+  assert.strictEqual(exp.classifyTier(200000).tier, 'C');
+  assert.strictEqual(exp.classifyTier(2000000).tier, 'S');
+});
+
+test('questsByTaskInterval 區間歸屬 + 跨 session 合併', () => {
+  const t1 = exp.fmtTs(new Date(Date.UTC(2026,5,1,10,0,0)));
+  const t2 = exp.fmtTs(new Date(Date.UTC(2026,5,1,12,0,0)));
+  const log = [
+    { ts: t1, kind: 'task', reason: '委託一' },
+    { ts: t2, kind: 'task', reason: '委託二' },
+  ];
+  const scan = { messages: [
+    { ts: Date.UTC(2026,5,1,9,30,0),  billable: 50000 },   // → 委託一（≤t1）
+    { ts: Date.UTC(2026,5,1,11,0,0),  billable: 200000 },  // → 委託二（t1<..≤t2）
+    { ts: Date.UTC(2026,5,1,13,0,0),  billable: 999 },     // → t2 之後，無 task，不形成委託
+  ] };
+  const quests = exp.questsByTaskInterval(scan, log);
+  assert.strictEqual(quests.length, 2);
+  assert.strictEqual(quests[0].billable, 50000);
+  assert.strictEqual(quests[0].tier, 'D');
+  assert.strictEqual(quests[1].billable, 200000);
+  assert.strictEqual(quests[1].tier, 'C');
+});
+
 test('scanTranscripts 彙總 token/對話/打字（排除 tool_result 與 < 開頭）', () => {
   const root = fx.tmpProjects([{ proj: 'projA', file: 's1.jsonl', lines: [
     fx.asstMsg('2026-06-01T10:00:00.000Z', 'claude-opus-4-8', { in: 100, out: 200, cc: 300, cr: 9000 }),

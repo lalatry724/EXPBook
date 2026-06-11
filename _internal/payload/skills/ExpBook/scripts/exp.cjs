@@ -34,6 +34,15 @@ const SKILL_GROUPS = [
 
 // ---- v2.5 衍生層常數 ----
 const BILLABLE = (u) => (u.input_tokens||0) + (u.output_tokens||0) + (u.cache_creation_input_tokens||0); // 排除 cache_read
+// 委託界線（計費等效 token；design §4.1，錨真實分位 p25/中位/p75/p90）
+const QUEST_TIERS = [
+  { tier: 'D', lo: 0,        hi: 170000 },
+  { tier: 'C', lo: 170000,   hi: 330000 },
+  { tier: 'B', lo: 330000,   hi: 760000 },
+  { tier: 'A', lo: 760000,   hi: 1800000 },
+  { tier: 'S', lo: 1800000,  hi: Infinity },
+];
+const ELITE_WEIGHT = { D: 1, C: 2, B: 3, A: 5, S: 8 }; // 精英分權重
 function projectsRoot() { return path.join(os.homedir(), '.claude', 'projects'); }
 const ACTIVE_GAP_MS = 15 * 60000;           // 使用時間：相鄰訊息 gap<15 分才累加
 // 定價（每百萬 token，2026-06；查 claude-api skill 為準，變動只重算展示欄、不影響等級）
@@ -523,6 +532,27 @@ function costOf(byModel) {
   }
   return usd;
 }
+function classifyTier(billable) {
+  for (const t of QUEST_TIERS) if (billable >= t.lo && billable < t.hi) return t;
+  return QUEST_TIERS[QUEST_TIERS.length - 1];
+}
+// 把 transcript token 依 task event 時間區間歸成委託；回傳每筆 task 對應的委託
+function questsByTaskInterval(scan, log) {
+  const tasks = log.filter((e) => e.kind === 'task')
+    .map((e) => ({ ev: e, ms: Date.parse(e.ts) }))
+    .filter((x) => !Number.isNaN(x.ms))
+    .sort((a, b) => a.ms - b.ms);
+  if (!tasks.length) return [];
+  const quests = tasks.map((t) => ({ ts: t.ev.ts, reason: t.ev.reason, dungeon: t.ev.dungeon || null, billable: 0 }));
+  for (const m of scan.messages) {
+    let idx = -1;
+    for (let i = 0; i < tasks.length; i++) { if (m.ts <= tasks[i].ms) { idx = i; break; } }
+    if (idx >= 0) quests[idx].billable += m.billable;
+  }
+  for (const q of quests) q.tier = classifyTier(q.billable).tier;
+  return quests;
+}
+
 // 衍生指標主函式（log = readLog() 結果；本 Task 只填基礎欄，委託/等級在後續 Task 補在 return base 前）
 function deriveMetrics(scan, log) {
   const base = {
@@ -537,6 +567,13 @@ function deriveMetrics(scan, log) {
     costUSD: costOf(scan.byModel),
     window: { from: scan.minTs, to: scan.maxTs, files: scan.fileCount, messages: scan.msgCount },
   };
+  const quests = questsByTaskInterval(scan, log);
+  const tierCount = { D: 0, C: 0, B: 0, A: 0, S: 0 };
+  let elitePoints = 0;
+  for (const q of quests) { tierCount[q.tier]++; elitePoints += ELITE_WEIGHT[q.tier] || 0; }
+  base.quests = quests;
+  base.tierCount = tierCount;
+  base.elitePoints = elitePoints;
   return base;
 }
 
@@ -642,7 +679,7 @@ module.exports = {
   historyLines, writeView, safeName,
   buildEvent, stagePending, readPending, flushPending, flushSummaryText, removeEvents,
   loadConfig, expDeltaOf,
-  scanTranscripts, activeHours, costOf, deriveMetrics, // v2.5 衍生層
+  scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, // v2.5 衍生層
 };
 
 if (require.main === module) main(process.argv.slice(2));
