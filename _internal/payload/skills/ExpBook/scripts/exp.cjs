@@ -373,7 +373,11 @@ function categorizeSkills(state) {
 function renderPanelLine(state, d) {
   const advLv = levelFor(state.global.exp);
   const eliteLv = advLv >= ELITE_UNLOCK_LV ? eliteLevel(d.elitePoints) : 0;
-  const lvs = `[等級] 冒險者${advLv} 精英${eliteLv} 指揮${d.commandLevel} 殺敵${d.slayLevel}`;
+  let lvs = `[等級] 冒險者${advLv} 精英${eliteLv} 指揮${d.commandLevel} 殺敵${d.slayLevel}`;
+  if (d.streak) {                                              // v2.5 Plan3 連勤顯示
+    const { current = 0, longest = 0 } = d.streak;
+    lvs += ` 🔥${current}` + (longest > current ? `(PR${longest})` : '');
+  }
   const cost = `[消耗] 魔力${fmtYi(d.totalProcessed, 1)}(有效${fmtYi(d.billable, 2)}) 金幣${fmtUSD(d.costUSD)}`;
   return `${lvs}   ${cost}`;
 }

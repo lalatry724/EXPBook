@@ -99,3 +99,15 @@ test('mergeRecords 取 max；recordPRs 回傳刷新項', () => {
   assert.ok(keys.includes('最長連戰'));
   assert.ok(!keys.includes('單日最高 token'));
 });
+
+test('renderPanelLine 接 🔥streak（longest>current 顯示 PR）', () => {
+  const LEVEL_STEP = exp.LEVEL_STEP;
+  const stateAt = (lv) => ({ global: { exp: (lv - 1) * LEVEL_STEP }, dungeons: {}, skills: {} });
+  const base = { elitePoints: 0, commandLevel: 22, slayLevel: 51, totalProcessed: 5e9, billable: 2e8, costUSD: 3990 };
+  const withStreak = exp.renderPanelLine(stateAt(18), Object.assign({}, base, { streak: { current: 5, longest: 9 } }));
+  assert.match(withStreak, /🔥5\(PR9\)/);
+  const noPR = exp.renderPanelLine(stateAt(18), Object.assign({}, base, { streak: { current: 9, longest: 9 } }));
+  assert.match(noPR, /🔥9(?!\(PR)/);
+  const noStreak = exp.renderPanelLine(stateAt(18), base);
+  assert.doesNotMatch(noStreak, /🔥/);
+});
