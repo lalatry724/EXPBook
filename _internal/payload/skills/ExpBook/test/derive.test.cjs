@@ -167,3 +167,20 @@ test('deriveMetrics 補 PR/習慣聚合欄', () => {
     assert.strictEqual(m.maxQuestBillable, 0);
   } finally { fx.rm(root); }
 });
+
+test('computeStreak 日曆週語意：6 天大空缺無法靠護符跨越', () => {
+  const mondays = ['2026-06-01', '2026-06-08', '2026-06-15', '2026-06-22'];
+  const log = mondays.map((d) => ({ ts: `${d} 10:00:00`, kind: 'task', reason: 'x' }));
+  const r = exp.computeStreak(log, '2026-06-22');
+  assert.strictEqual(r.current, 1);
+  assert.strictEqual(r.longest, 1);
+});
+
+test('computeStreak 跨週單日空缺可由該週護符補', () => {
+  const log = [
+    { ts: '2026-06-07 10:00:00', kind: 'task', reason: 'x' },
+    { ts: '2026-06-09 10:00:00', kind: 'task', reason: 'x' },
+  ];
+  const r = exp.computeStreak(log, '2026-06-09');
+  assert.strictEqual(r.current, 2);
+});

@@ -622,37 +622,39 @@ function commandLevel(conversations) { return Math.floor(Math.sqrt(Math.max(0, c
 function slayLevel(typedChars) { return Math.floor(Math.sqrt(Math.max(0, typedChars) / 600)); }
 function _todayStr() { return now().slice(0, 10); }
 
-// 連勤計算（護符抵斷；活躍日 = 有 task event 的日期）
+// 日曆週桶（7 天，Monday 對齊；epoch day0=Thu，+4 使 Monday 起算為整數邊界）
+function weekIndex(ms) { return Math.floor((Math.floor(ms / 86400000) + 4) / 7); }
+
+// 連勤（design §3.3 反焦慮版）：活躍日=有 task event 的日期；護符＝每進入一個新日曆週發 1 枚，
+// 斷 1 天消耗 1 枚護符不算斷；current=從今日往回的連勤，longest=全期最長（PR，永久保留）。
 function computeStreak(log, todayStr) {
   const days = new Set(log.filter((e) => e.kind === 'task').map((e) => e.ts.slice(0, 10)));
   if (!days.size) return { current: 0, longest: 0 };
   const dayMs = 86400000;
   const toMs = (s) => Date.parse(s + 'T00:00:00Z');
-  const activeSet = new Set([...days].map(toMs));
-  // current：從 today 往回，只有活躍日 increment current，護符允許跨越單日空缺
-  let current = 0, tokens = 0, cursor = toMs(todayStr);
+  const active = new Set([...days].map(toMs));
+  // current：今日往回，遇活躍日 +1；遇空缺日有護符則消耗跳過、否則斷。每進入新週 +1 護符。
+  let current = 0, cursor = toMs(todayStr), amulets = 0;
+  const weeksSeen = new Set();
   while (true) {
-    if (activeSet.has(cursor)) { current++; cursor -= dayMs; }
-    else {
-      const earned = Math.floor(current / 7) + 1;
-      if (tokens < earned) { tokens++; cursor -= dayMs; }
-      else break;
-    }
+    const wk = weekIndex(cursor);
+    if (!weeksSeen.has(wk)) { weeksSeen.add(wk); amulets++; }
+    if (active.has(cursor)) { current++; cursor -= dayMs; }
+    else if (amulets > 0) { amulets--; cursor -= dayMs; }
+    else break;
     if (current > 100000) break;
   }
-  // longest：對排序活躍日做同規則連鏈
-  const sorted = [...activeSet].sort((a, b) => a - b);
-  let longest = 0, run = 0, tok2 = 0, prev = null;
-  for (const ms of sorted) {
-    if (prev == null) { run = 1; tok2 = 0; }
-    else {
-      const gapDays = Math.round((ms - prev) / dayMs);
-      if (gapDays === 1) run++;
-      else if (gapDays === 2 && tok2 < Math.floor(run / 7) + 1) { tok2++; run++; }
-      else { run = 1; tok2 = 0; }
-    }
-    if (run > longest) longest = run;
-    prev = ms;
+  // longest：對 [min..max] 整段日期向前掃，同護符規則；斷掉時重置 run 與護符預算（新區段重新計週）。
+  const sorted = [...active].sort((a, b) => a - b);
+  const min = sorted[0], max = sorted[sorted.length - 1];
+  let longest = 0, run = 0, amu = 0;
+  let seg = new Set();
+  for (let c = min; c <= max; c += dayMs) {
+    const wk = weekIndex(c);
+    if (!seg.has(wk)) { seg.add(wk); amu++; }
+    if (active.has(c)) { run++; if (run > longest) longest = run; }
+    else if (amu > 0) { amu--; }
+    else { run = 0; amu = 1; seg = new Set([wk]); }
   }
   return { current, longest };
 }
@@ -969,7 +971,7 @@ module.exports = {
   buildEvent, stagePending, readPending, flushPending, flushSummaryText, removeEvents,
   loadConfig, expDeltaOf,
   scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, deriveAchievements, readDerived, // v2.5 衍生層
-  commandLevel, slayLevel, computeStreak, // v2.5 等級公式 + 連勤
+  commandLevel, slayLevel, computeStreak, weekIndex, // v2.5 等級公式 + 連勤
   fmtYi, fmtWan, fmtUSD, eliteLevel, // v2.5 顯示層：數字格式 + 精英等級
   renderPanelLine, renderFuelDashboard, // v2.5 一行式四等級面板 + 燃料儀表板
   RARITY_RANK, ACHIEVEMENTS, badgeById, buildBadgeContext, evalBadges, // v2.5 Plan3 徽章
