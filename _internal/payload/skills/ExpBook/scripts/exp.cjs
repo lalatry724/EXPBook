@@ -576,7 +576,6 @@ function scanTranscripts(root = projectsRoot()) {
       fileCount++;
       let sessBill = 0;
       let sessMin = null, sessMax = null;
-      const fileTsList = [];
       for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
         if (!line.trim()) continue;
         let o; try { o = JSON.parse(line); } catch { continue; }
@@ -587,7 +586,6 @@ function scanTranscripts(root = projectsRoot()) {
         const tsMs = tsRaw ? Date.parse(tsRaw) : null;
         if (tsMs != null && !Number.isNaN(tsMs)) {
           tsList.push(tsMs);
-          fileTsList.push(tsMs);
           if (minTs == null || tsMs < minTs) minTs = tsMs;
           if (maxTs == null || tsMs > maxTs) maxTs = tsMs;
           if (sessMin == null || tsMs < sessMin) sessMin = tsMs;
@@ -618,15 +616,7 @@ function scanTranscripts(root = projectsRoot()) {
         }
       }
       if (sessBill > 0) perSession.push(sessBill);
-      // split file timestamps by calendar day and record each day-session's span
-      if (fileTsList.length > 0) {
-        const byDay = {};
-        for (const ms of fileTsList) { const d = new Date(ms).toISOString().slice(0, 10); (byDay[d] || (byDay[d] = [])).push(ms); }
-        for (const arr of Object.values(byDay)) {
-          const mn = Math.min(...arr), mx = Math.max(...arr);
-          if (mx > mn) sessionSpans.push(mx - mn);
-        }
-      }
+      if (sessMin != null && sessMax != null && sessMax > sessMin) sessionSpans.push(sessMax - sessMin); // 單 session(檔)時長
     }
   };
   walk(root);

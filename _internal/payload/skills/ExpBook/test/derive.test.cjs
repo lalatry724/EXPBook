@@ -131,18 +131,24 @@ test('scanTranscripts 彙總 token/對話/打字（排除 tool_result 與 < 開�
 });
 
 test('scanTranscripts 補單日對話/字數/單session時長聚合', () => {
-  const root = fx.tmpProjects([{ proj: 'p', file: 's.jsonl', lines: [
-    fx.asstMsg('2026-06-01T10:00:00.000Z', 'claude-opus-4-8', { in: 100, out: 0, cc: 0, cr: 0 }),
-    fx.userMsg('2026-06-01T10:00:00.000Z', 'abcde'),
-    fx.userMsg('2026-06-01T16:00:00.000Z', 'fghij'),
-    fx.userMsg('2026-06-02T10:00:00.000Z', 'kl'),
-  ] }]);
+  // session = 一個 transcript 檔。s1 同日跨 6hr → sessionSpans 6hr；s2 單筆 → 無 span。
+  const root = fx.tmpProjects([
+    { proj: 'p', file: 's1.jsonl', lines: [
+      fx.asstMsg('2026-06-01T10:00:00.000Z', 'claude-opus-4-8', { in: 100, out: 0, cc: 0, cr: 0 }),
+      fx.userMsg('2026-06-01T10:00:00.000Z', 'abcde'),
+      fx.userMsg('2026-06-01T16:00:00.000Z', 'fghij'),
+    ] },
+    { proj: 'p', file: 's2.jsonl', lines: [
+      fx.userMsg('2026-06-02T10:00:00.000Z', 'kl'),
+    ] },
+  ]);
   try {
     const s = exp.scanTranscripts(root);
     assert.strictEqual(s.perDayTurns['2026-06-01'], 2);
     assert.strictEqual(s.perDayTurns['2026-06-02'], 1);
     assert.strictEqual(s.perDayChars['2026-06-01'], 10);
-    assert.strictEqual(Math.round(s.sessionSpans[0] / 3600000), 6);
+    assert.strictEqual(s.sessionSpans.length, 1);                     // 只有 s1 有跨度
+    assert.strictEqual(Math.round(s.sessionSpans[0] / 3600000), 6);   // 10:00→16:00 = 6hr
   } finally { fx.rm(root); }
 });
 
