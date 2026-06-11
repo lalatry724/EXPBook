@@ -310,6 +310,7 @@ function buildEvent(kind, reason, { dungeon, skills } = {}) {
   if (dungeon) ev.dungeon = dungeon;
   if (skills && skills.length) ev.skills = skills;
   ev.exp = EXP_OF[kind] ?? 0;
+  ev.cwd = process.cwd(); // #029: 記錄觸發 event 的專案資料夾，與 dungeon tag 並存
   return ev;
 }
 
