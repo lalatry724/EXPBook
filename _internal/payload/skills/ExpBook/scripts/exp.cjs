@@ -35,6 +35,13 @@ const SKILL_GROUPS = [
 // ---- v2.5 衍生層常數 ----
 const BILLABLE = (u) => (u.input_tokens||0) + (u.output_tokens||0) + (u.cache_creation_input_tokens||0); // 排除 cache_read
 function projectsRoot() { return path.join(os.homedir(), '.claude', 'projects'); }
+const ACTIVE_GAP_MS = 15 * 60000;           // 使用時間：相鄰訊息 gap<15 分才累加
+// 定價（每百萬 token，2026-06；查 claude-api skill 為準，變動只重算展示欄、不影響等級）
+const PRICING = {
+  opus:   { in: 5,  out: 25, cc: 6.25, cr: 0.5 },
+  sonnet: { in: 3,  out: 15, cc: 3.75, cr: 0.3 },
+  haiku:  { in: 1,  out: 5,  cc: 1.25, cr: 0.1 },
+};
 
 // ---- 路徑 ----
 function resolveHome() {
@@ -498,6 +505,41 @@ function scanTranscripts(root = projectsRoot()) {
     msgCount, fileCount, minTs, maxTs };
 }
 
+// 使用時間：相鄰訊息 gap<15 分才累加，回傳小時
+function activeHours(tsList) {
+  const a = tsList.slice().sort((x, y) => x - y);
+  let total = 0;
+  for (let i = 1; i < a.length; i++) { const d = a[i] - a[i - 1]; if (d > 0 && d < ACTIVE_GAP_MS) total += d; }
+  return total / 3600000;
+}
+// 等效成本 $：每 model 各欄 × 單價（model 名以 opus/sonnet/haiku 子字串匹配；未知→不計）
+function costOf(byModel) {
+  let usd = 0;
+  for (const [model, v] of Object.entries(byModel)) {
+    const key = /opus/i.test(model) ? 'opus' : /sonnet/i.test(model) ? 'sonnet' : /haiku/i.test(model) ? 'haiku' : null;
+    if (!key) continue;
+    const pr = PRICING[key];
+    usd += (v.input * pr.in + v.output * pr.out + v.cacheCreation * pr.cc + v.cacheRead * pr.cr) / 1e6;
+  }
+  return usd;
+}
+// 衍生指標主函式（log = readLog() 結果；本 Task 只填基礎欄，委託/等級在後續 Task 補在 return base 前）
+function deriveMetrics(scan, log) {
+  const base = {
+    billable: scan.billable,
+    totalProcessed: scan.totalProcessed,
+    flows: { input: scan.tok.input, output: scan.tok.output, cacheCreation: scan.tok.cacheCreation, cacheRead: scan.tok.cacheRead },
+    conversations: scan.userTurns,
+    typedChars: scan.userChars,
+    codeChars: scan.codeChars,
+    codePct: scan.userChars ? scan.codeChars / scan.userChars : 0,
+    activeHours: activeHours(scan.tsList),
+    costUSD: costOf(scan.byModel),
+    window: { from: scan.minTs, to: scan.maxTs, files: scan.fileCount, messages: scan.msgCount },
+  };
+  return base;
+}
+
 // ---- CLI dispatch ----
 function die(msg) { console.error(msg); process.exit(1); }
 function need(val, msg) { if (!val) die(msg); return val; }
@@ -600,7 +642,7 @@ module.exports = {
   historyLines, writeView, safeName,
   buildEvent, stagePending, readPending, flushPending, flushSummaryText, removeEvents,
   loadConfig, expDeltaOf,
-  scanTranscripts, // v2.5 衍生層
+  scanTranscripts, activeHours, costOf, deriveMetrics, // v2.5 衍生層
 };
 
 if (require.main === module) main(process.argv.slice(2));
