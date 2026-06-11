@@ -135,3 +135,27 @@ test('deriveAchievements 合併：unlocked 只進不退、records 取 max、回�
     assert.ok(j2.records);
   } finally { fx.rm(home); fx.rm(root); }
 });
+
+test('pickEasterEgg 優先序：連擊 > 里程碑 > 暴擊 > 寶箱 > 稀有', () => {
+  const rngNo = () => 0.99;
+  let egg = {};
+  assert.match(exp.pickEasterEgg({ streak: { current: 7 }, totalProcessed: 0 }, egg, [], '2026-06-11', rngNo), /連戰 7/);
+  egg = {};
+  const l1 = exp.pickEasterEgg({ streak: { current: 1 }, totalProcessed: 2.4e8 }, egg, [], '2026-06-11', rngNo);
+  assert.match(l1, /跨越 2 億/);
+  assert.strictEqual(egg.lastYi, 2);
+  const l2 = exp.pickEasterEgg({ streak: { current: 1 }, totalProcessed: 2.4e8 }, egg, [['單委託最大', 9]], '2026-06-11', rngNo);
+  assert.match(l2, /暴擊/);
+  const egg2 = { lastYi: 99 };
+  const box = exp.pickEasterEgg({ streak: { current: 1 }, totalProcessed: 0 }, egg2, [], '2026-06-11', rngNo);
+  assert.match(box, /寶箱/);
+  assert.strictEqual(egg2.lastDay, '2026-06-11');
+  const none = exp.pickEasterEgg({ streak: { current: 1 }, totalProcessed: 0 }, egg2, [], '2026-06-11', rngNo);
+  assert.strictEqual(none, '');
+});
+
+test('pickEasterEgg 稀有遭遇：rng<0.03 命中純台詞', () => {
+  const egg = { lastDay: '2026-06-11', lastYi: 99 };
+  const line = exp.pickEasterEgg({ streak: { current: 1 }, totalProcessed: 0 }, egg, [], '2026-06-11', () => 0.01);
+  assert.ok(exp.RARE_LINES.includes(line));
+});

@@ -178,6 +178,19 @@ function recordPRs(prev, next) {
   return prs;
 }
 
+// 隨機彩蛋（design §3.4）：flush 一行、薄 AI、全無 EXP。回傳一行字串（無→''）；就地更新 egg 狀態。
+// 優先序：連擊慶祝 > 里程碑炸裂 > 暴擊(PR) > 每日寶箱 > 稀有遭遇(唯一隨機項)。
+function pickEasterEgg(d, egg, prs, todayStr, rng = Math.random) {
+  const cur = (d.streak && d.streak.current) || 0;
+  if (STREAK_CELEBRATE.includes(cur)) return `🎉 連戰 ${cur} 日達成，這份堅持值得記上一筆。`;
+  const yi = Math.floor((d.totalProcessed || 0) / 1e8);
+  if (yi > (egg.lastYi || 0)) { egg.lastYi = yi; return `💥 魔力消耗跨越 ${yi} 億 token——燃料燒得轟轟烈烈。`; }
+  if (prs && prs.length) return `⚡ 暴擊！刷新個人紀錄：${prs[0][0]}。`;
+  if (egg.lastDay !== todayStr) { egg.lastDay = todayStr; return '🎁 每日寶箱：今天也辛苦了，繼續前進。'; }
+  if (rng() < 0.03) { const i = Math.floor(rng() * RARE_LINES.length) % RARE_LINES.length; return RARE_LINES[i]; }
+  return '';
+}
+
 // ---- v2.5 顯示層：數字格式 ----
 function fmtYi(n, dp = 1) { return (Number(n || 0) / 1e8).toFixed(dp) + '億'; }      // token → 億（1 億=100M）
 function fmtWan(chars) { return (Number(chars || 0) / 10000).toFixed(1) + '萬字'; }  // 字元 → 萬字
@@ -992,7 +1005,7 @@ module.exports = {
   fmtYi, fmtWan, fmtUSD, eliteLevel, // v2.5 顯示層：數字格式 + 精英等級
   renderPanelLine, renderFuelDashboard, // v2.5 一行式四等級面板 + 燃料儀表板
   RARITY_RANK, ACHIEVEMENTS, badgeById, buildBadgeContext, evalBadges, // v2.5 Plan3 徽章
-  deriveTitle, mergeRecords, recordPRs,
+  deriveTitle, mergeRecords, recordPRs, pickEasterEgg, RARE_LINES,
 };
 
 if (require.main === module) main(process.argv.slice(2));
