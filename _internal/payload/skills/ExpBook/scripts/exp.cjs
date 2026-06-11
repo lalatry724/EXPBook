@@ -254,6 +254,23 @@ function renderPanelLine(state, d) {
   return `${lvs}   ${cost}`;
 }
 
+// 燃料儀表板（design §4）：生涯統計、人話化、不升級、負面框架代價
+function renderFuelDashboard(d) {
+  const tc = d.tierCount || { D: 0, C: 0, B: 0, A: 0, S: 0 };
+  const f = d.flows || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+  const books = Math.round((d.billable || 0) * BOOK_RATE / BOOK_CHARS);
+  const codePct = Math.round((d.codePct || 0) * 100);
+  let out = `\n🔥 燃料儀表板（生涯統計·不升級）\n`;
+  out += `  委託討伐：D${tc.D} C${tc.C} B${tc.B} A${tc.A} S${tc.S}（精英分 ${d.elitePoints || 0}）\n`;
+  out += `  token 流量：${FLOW_LABEL.input} ${fmtYi(f.input, 2)}｜${FLOW_LABEL.output} ${fmtYi(f.output, 2)}｜`
+       + `${FLOW_LABEL.cacheCreation} ${fmtYi(f.cacheCreation, 2)}｜${FLOW_LABEL.cacheRead} ${fmtYi(f.cacheRead, 1)}\n`;
+  out += `  書本換算：約 ${books.toLocaleString('en-US')} 本（計費等效 × ${BOOK_RATE} 字/token，10 萬字=1 本）\n`;
+  out += `  使用時間 ${(d.activeHours || 0).toFixed(1)} hr｜對話 ${d.conversations || 0} 次｜`
+       + `打字 ${fmtWan(d.typedChars)}(code ${codePct}%)\n`;
+  out += `  代價：魔力 ${fmtYi(d.totalProcessed, 1)}(有效 ${fmtYi(d.billable, 2)})｜金幣 ${fmtUSD(d.costUSD)}\n`;
+  return out;
+}
+
 function renderStatus(state) {
   const g = progressFor(state.global.exp);
   let out = `# EXP 玩家面板（冒險者公會）\n\n`;
@@ -792,7 +809,7 @@ module.exports = {
   scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, deriveAchievements, // v2.5 衍生層
   commandLevel, slayLevel, computeStreak, // v2.5 等級公式 + 連勤
   fmtYi, fmtWan, fmtUSD, eliteLevel, // v2.5 顯示層：數字格式 + 精英等級
-  renderPanelLine, // v2.5 一行式四等級面板
+  renderPanelLine, renderFuelDashboard, // v2.5 一行式四等級面板 + 燃料儀表板
 };
 
 if (require.main === module) main(process.argv.slice(2));

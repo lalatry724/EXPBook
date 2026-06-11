@@ -43,3 +43,24 @@ test('renderPanelLine：LV50 後精英用 eliteLevel 換算', () => {
   assert.match(line, /精英\d+/);
   assert.doesNotMatch(line.split('指揮')[0], /精英0\b/); // 5000 分 → 精英 > 0
 });
+
+test('renderFuelDashboard：委託/四分項人話/書本/時間/代價齊備', () => {
+  const d = {
+    tierCount: { D: 54, C: 60, B: 58, A: 35, S: 24 }, elitePoints: 1234,
+    flows: { input: 7.2e6, output: 2.82e7, cacheCreation: 1.685e8, cacheRead: 4.806e9 },
+    billable: 2.04e8, totalProcessed: 5.01e9, costUSD: 3990,
+    conversations: 2129, typedChars: 1502000, codePct: 0.28, activeHours: 116.6,
+  };
+  const out = exp.renderFuelDashboard(d);
+  assert.match(out, /委託討伐.*D54 C60 B58 A35 S24/s);
+  assert.match(out, /精英分 1234/);
+  assert.match(out, /你新送進/);
+  assert.match(out, /AI寫出/);
+  assert.match(out, /首次建快取/);
+  assert.match(out, /重複讀歷史/);
+  // 書本：2.04e8 × 0.7 / 1e5 = 1428 本
+  assert.match(out, /約 1,?428 本/);
+  assert.match(out, /116\.6\s*hr/);
+  assert.match(out, /對話 2129/);
+  assert.match(out, /150\.2萬字.*28%/s); // typedChars 含 code，標 code%
+});
