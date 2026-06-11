@@ -66,6 +66,7 @@ function paths(base = resolveHome()) {
     pendingFile: path.join(base, '_pending.jsonl'),
     lastFlushFile: path.join(base, '_last_flush.txt'),
     configFile: path.join(base, 'config.json'),
+    achievementsFile: path.join(base, 'achievements.json'),
   };
 }
 
@@ -620,6 +621,24 @@ function deriveMetrics(scan, log) {
   return base;
 }
 
+// 衍生引擎入口：掃 transcript + log → 算指標 → 寫 achievements.json（衍生快取，可 rebuild 重算）
+// opts.projectsRoot 可注入（測試用）；opts.log 可注入，否則讀 p 的 log.jsonl
+function deriveAchievements(p = paths(), opts = {}) {
+  ensureBase(p);
+  const root = opts.projectsRoot || projectsRoot();
+  const log = opts.log || readLog(p);
+  const scan = scanTranscripts(root);
+  const derived = deriveMetrics(scan, log);
+  const payload = {
+    version: 'v2.5',
+    scanned_at: now(),
+    last_scanned_ts: scan.maxTs != null ? new Date(scan.maxTs).toISOString() : null,
+    derived,
+  };
+  fs.writeFileSync(p.achievementsFile, JSON.stringify(payload, null, 2));
+  return payload;
+}
+
 // ---- CLI dispatch ----
 function die(msg) { console.error(msg); process.exit(1); }
 function need(val, msg) { if (!val) die(msg); return val; }
@@ -722,7 +741,7 @@ module.exports = {
   historyLines, writeView, safeName,
   buildEvent, stagePending, readPending, flushPending, flushSummaryText, removeEvents,
   loadConfig, expDeltaOf,
-  scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, // v2.5 衍生層
+  scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, deriveAchievements, // v2.5 衍生層
   commandLevel, slayLevel, computeStreak, // v2.5 等級公式 + 連勤
 };
 

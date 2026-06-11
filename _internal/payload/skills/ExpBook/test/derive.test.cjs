@@ -76,6 +76,22 @@ test('computeStreak 連續活躍日 + 護符抵斷', () => {
   assert.strictEqual(r.longest >= 4, true);
 });
 
+test('deriveAchievements 寫 achievements.json + last_scanned_ts', () => {
+  const home = fx.tmpHome();
+  const root = fx.tmpProjects([{ proj: 'p', file: 's.jsonl', lines: [
+    fx.asstMsg('2026-06-01T10:00:00.000Z', 'claude-opus-4-8', { in: 1000, out: 2000, cc: 0, cr: 0 }),
+  ] }]);
+  try {
+    const p = exp.paths(home);
+    const res = exp.deriveAchievements(p, { projectsRoot: root, log: [] });
+    const fs = require('fs');
+    const json = JSON.parse(fs.readFileSync(p.achievementsFile, 'utf8'));
+    assert.strictEqual(json.derived.billable, 3000);
+    assert.strictEqual(typeof json.last_scanned_ts, 'string');
+    assert.strictEqual(json.derived.costUSD > 0, true);
+  } finally { fx.rm(home); fx.rm(root); }
+});
+
 test('scanTranscripts 彙總 token/對話/打字（排除 tool_result 與 < 開頭）', () => {
   const root = fx.tmpProjects([{ proj: 'projA', file: 's1.jsonl', lines: [
     fx.asstMsg('2026-06-01T10:00:00.000Z', 'claude-opus-4-8', { in: 100, out: 200, cc: 300, cr: 9000 }),
