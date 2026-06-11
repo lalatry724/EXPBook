@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const expPath = path.join(os.homedir(), '.claude', 'skills', 'ExpBook', 'scripts', 'exp.cjs');
+const expPath = path.join(os.homedir(), '.gemini', 'skills', 'ExpBook', 'scripts', 'exp.cjs');
 let exp;
 try { exp = require(expPath); } catch { process.exit(0); }
 
