@@ -61,6 +61,21 @@ test('questsByTaskInterval 區間歸屬 + 跨 session 合併', () => {
   assert.strictEqual(quests[1].tier, 'C');
 });
 
+test('commandLevel / slayLevel 平方根公式', () => {
+  assert.strictEqual(exp.commandLevel(2129), 23); // ⌊√(2129/4)⌋ = ⌊23.07⌋
+  assert.strictEqual(exp.slayLevel(1502000), 50); // ⌊√(1502000/600)⌋ = ⌊50.03⌋
+  assert.strictEqual(exp.commandLevel(0), 0);
+});
+
+test('computeStreak 連續活躍日 + 護符抵斷', () => {
+  // 活躍日：06-01,06-02,06-03 連 3；隔一天 06-05（斷1天，護符抵）
+  const mk = (d) => ({ ts: `2026-06-0${d} 10:00:00`, kind: 'task', reason: 'x' });
+  const log = [1,2,3,5].map(mk);
+  const r = exp.computeStreak(log, '2026-06-05');
+  assert.strictEqual(r.current, 4);   // 06-01~03 + 護符補 06-04 + 06-05
+  assert.strictEqual(r.longest >= 4, true);
+});
+
 test('scanTranscripts 彙總 token/對話/打字（排除 tool_result 與 < 開頭）', () => {
   const root = fx.tmpProjects([{ proj: 'projA', file: 's1.jsonl', lines: [
     fx.asstMsg('2026-06-01T10:00:00.000Z', 'claude-opus-4-8', { in: 100, out: 200, cc: 300, cr: 9000 }),

@@ -434,6 +434,46 @@ const HELP = `ExpBook 指令（冒險者公會制；冒險者等級 + 地城(專
   調整 EXP 數值：編輯 ${path.join(resolveHome(), 'config.json')}  例 {"exp_of":{"task":150,"lesson":30}}（只影響之後新事件）
   預設 7 技能：${DEFAULT_SKILLS.join(' / ')}（可自由新增其他技能 tag）`;
 
+// ---- v2.5 衍生層：等級公式 ----
+function commandLevel(conversations) { return Math.floor(Math.sqrt(Math.max(0, conversations) / 4)); }
+function slayLevel(typedChars) { return Math.floor(Math.sqrt(Math.max(0, typedChars) / 600)); }
+function _todayStr() { return now().slice(0, 10); }
+
+// 連勤計算（護符抵斷；活躍日 = 有 task event 的日期）
+function computeStreak(log, todayStr) {
+  const days = new Set(log.filter((e) => e.kind === 'task').map((e) => e.ts.slice(0, 10)));
+  if (!days.size) return { current: 0, longest: 0 };
+  const dayMs = 86400000;
+  const toMs = (s) => Date.parse(s + 'T00:00:00Z');
+  const activeSet = new Set([...days].map(toMs));
+  // current：從 today 往回，只有活躍日 increment current，護符允許跨越單日空缺
+  let current = 0, tokens = 0, cursor = toMs(todayStr);
+  while (true) {
+    if (activeSet.has(cursor)) { current++; cursor -= dayMs; }
+    else {
+      const earned = Math.floor(current / 7) + 1;
+      if (tokens < earned) { tokens++; cursor -= dayMs; }
+      else break;
+    }
+    if (current > 100000) break;
+  }
+  // longest：對排序活躍日做同規則連鏈
+  const sorted = [...activeSet].sort((a, b) => a - b);
+  let longest = 0, run = 0, tok2 = 0, prev = null;
+  for (const ms of sorted) {
+    if (prev == null) { run = 1; tok2 = 0; }
+    else {
+      const gapDays = Math.round((ms - prev) / dayMs);
+      if (gapDays === 1) run++;
+      else if (gapDays === 2 && tok2 < Math.floor(run / 7) + 1) { tok2++; run++; }
+      else { run = 1; tok2 = 0; }
+    }
+    if (run > longest) longest = run;
+    prev = ms;
+  }
+  return { current, longest };
+}
+
 // ---- v2.5 衍生層：掃 transcript 原始彙總 ----
 function _txtOf(content) {
   if (typeof content === 'string') return content;
@@ -574,6 +614,9 @@ function deriveMetrics(scan, log) {
   base.quests = quests;
   base.tierCount = tierCount;
   base.elitePoints = elitePoints;
+  base.commandLevel = commandLevel(base.conversations);
+  base.slayLevel = slayLevel(base.typedChars);
+  base.streak = computeStreak(log, _todayStr());
   return base;
 }
 
@@ -680,6 +723,7 @@ module.exports = {
   buildEvent, stagePending, readPending, flushPending, flushSummaryText, removeEvents,
   loadConfig, expDeltaOf,
   scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, // v2.5 衍生層
+  commandLevel, slayLevel, computeStreak, // v2.5 等級公式 + 連勤
 };
 
 if (require.main === module) main(process.argv.slice(2));
