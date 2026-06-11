@@ -535,7 +535,7 @@ function scanTranscripts(root = projectsRoot()) {
           bm.cacheCreation += u.cache_creation_input_tokens || 0; bm.cacheRead += u.cache_read_input_tokens || 0;
           const b = BILLABLE(u);
           sessBill += b;
-          if (tsMs != null) { messages.push({ ts: tsMs, billable: b }); perDay[tsRaw.slice(0, 10)] = (perDay[tsRaw.slice(0, 10)] || 0) + b; }
+          if (tsMs != null && !Number.isNaN(tsMs)) { messages.push({ ts: tsMs, billable: b }); perDay[tsRaw.slice(0, 10)] = (perDay[tsRaw.slice(0, 10)] || 0) + b; } // NaN guard 與 tsList 一致：壞 timestamp 不入區間 join
           msgCount++;
         }
         if (role === 'user' && msg.content != null && !_isToolResult(msg.content)) {
@@ -552,7 +552,7 @@ function scanTranscripts(root = projectsRoot()) {
   walk(root);
   const billable = tok.input + tok.output + tok.cacheCreation;
   return { tok, byModel, billable, totalProcessed: billable + tok.cacheRead,
-    messages, tsList, perSession, perDay, userTurns, userChars, codeChars,
+    messages, tsList, perSession, perDay, userTurns, userChars, codeChars, // perSession/perDay：Plan 2 分位校準/每日里程碑用
     msgCount, fileCount, minTs, maxTs };
 }
 
