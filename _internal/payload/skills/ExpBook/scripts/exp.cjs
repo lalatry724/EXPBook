@@ -829,30 +829,43 @@ function deriveMetrics(scan, log) {
   return base;
 }
 
-// 衍生引擎入口：掃 transcript + log → 算指標 → 寫 achievements.json（衍生快取，可 rebuild 重算）
+// 讀 achievements.json 全檔（缺檔/壞檔回 null）
+function readAchievements(p = paths()) {
+  try { return JSON.parse(fs.readFileSync(p.achievementsFile, 'utf8')); } catch { return null; }
+}
+
+// 衍生引擎入口：掃 transcript + log → 算指標 → 讀-合併-寫 achievements.json
 // opts.projectsRoot 可注入（測試用）；opts.log 可注入，否則讀 p 的 log.jsonl
 function deriveAchievements(p = paths(), opts = {}) {
   ensureBase(p);
   const root = opts.projectsRoot || projectsRoot();
   const log = opts.log || readLog(p);
+  const prev = readAchievements(p) || {};
   const scan = scanTranscripts(root);
   const derived = deriveMetrics(scan, log);
+  // 徽章解鎖（只進不退）
+  const ctx = buildBadgeContext(computeState(log), log, derived);
+  const nowUnlocked = evalBadges(ctx);
+  const unlocked = Object.assign({}, prev.unlocked || {});
+  const newly = [];
+  for (const id of nowUnlocked) { if (!unlocked[id]) { unlocked[id] = now(); newly.push(id); } }
+  // PR records 合併
+  const prevRecords = prev.records || {};
+  const records = mergeRecords(prevRecords, derived);
+  const prs = recordPRs(prevRecords, records);
   const payload = {
-    version: 'v2.5',
-    scanned_at: now(),
+    version: 'v2.5', scanned_at: now(),
     last_scanned_ts: scan.maxTs != null ? new Date(scan.maxTs).toISOString() : null,
-    derived,
+    derived, unlocked, records, egg: prev.egg || {},
   };
   fs.writeFileSync(p.achievementsFile, JSON.stringify(payload, null, 2));
-  return payload;
+  return Object.assign({}, payload, { _newly: newly, _prs: prs }); // _ 欄只在回傳、不寫檔
 }
 
 // 讀 achievements.json 的 derived 區（顯示層用）；缺檔/壞檔回 null（→ renderStatus 維持舊輸出）
 function readDerived(p = paths()) {
-  try {
-    const j = JSON.parse(fs.readFileSync(p.achievementsFile, 'utf8'));
-    return j && j.derived ? j.derived : null;
-  } catch { return null; }
+  const a = readAchievements(p);
+  return a && a.derived ? a.derived : null;
 }
 
 // ---- CLI dispatch ----
@@ -974,7 +987,7 @@ module.exports = {
   historyLines, writeView, safeName,
   buildEvent, stagePending, readPending, flushPending, flushSummaryText, removeEvents,
   loadConfig, expDeltaOf,
-  scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, deriveAchievements, readDerived, // v2.5 衍生層
+  scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, deriveAchievements, readDerived, readAchievements, // v2.5 衍生層
   commandLevel, slayLevel, computeStreak, weekIndex, // v2.5 等級公式 + 連勤
   fmtYi, fmtWan, fmtUSD, eliteLevel, // v2.5 顯示層：數字格式 + 精英等級
   renderPanelLine, renderFuelDashboard, // v2.5 一行式四等級面板 + 燃料儀表板

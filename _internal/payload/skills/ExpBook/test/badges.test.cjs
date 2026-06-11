@@ -2,6 +2,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const exp = require('../scripts/exp.cjs');
+const fs = require('fs');
+const fx = require('./fixtures.cjs');
 
 function D(over = {}) {
   return Object.assign({
@@ -110,4 +112,26 @@ test('renderPanelLine 接 🔥streak（longest>current 顯示 PR）', () => {
   assert.match(noPR, /🔥9(?!\(PR)/);
   const noStreak = exp.renderPanelLine(stateAt(18), base);
   assert.doesNotMatch(noStreak, /🔥/);
+});
+
+test('deriveAchievements 合併：unlocked 只進不退、records 取 max、回傳 _newly', () => {
+  const home = fx.tmpHome();
+  const root = fx.tmpProjects([{ proj: 'p', file: 's.jsonl', lines: [
+    fx.asstMsg('2026-06-01T10:00:00.000Z', 'claude-opus-4-8', { in: 1000, out: 2000, cc: 0, cr: 0 }),
+    fx.userMsg('2026-06-01T10:01:00.000Z', 'hello'),
+  ] }]);
+  try {
+    const p = exp.paths(home);
+    const log = [{ ts: '2026-06-01 10:00:00', kind: 'task', reason: '完成首個有意義的委託' }];
+    const r1 = exp.deriveAchievements(p, { projectsRoot: root, log });
+    assert.ok(r1._newly.includes('first_task'));
+    const j1 = JSON.parse(fs.readFileSync(p.achievementsFile, 'utf8'));
+    assert.ok(j1.unlocked.first_task);
+    assert.ok(!('_newly' in j1));
+    const r2 = exp.deriveAchievements(p, { projectsRoot: root, log });
+    assert.ok(!r2._newly.includes('first_task'));
+    const j2 = JSON.parse(fs.readFileSync(p.achievementsFile, 'utf8'));
+    assert.strictEqual(j2.unlocked.first_task, j1.unlocked.first_task);
+    assert.ok(j2.records);
+  } finally { fx.rm(home); fx.rm(root); }
 });
