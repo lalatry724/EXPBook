@@ -271,9 +271,10 @@ function renderFuelDashboard(d) {
   return out;
 }
 
-function renderStatus(state) {
+function renderStatus(state, derived = null) {
   const g = progressFor(state.global.exp);
   let out = `# EXP 玩家面板（冒險者公會）\n\n`;
+  if (derived) out += renderPanelLine(state, derived) + `\n\n`;   // v2.5 一行面板
   out += `冒險者　LV${g.lv} (${g.into}/${g.step}) Total:${state.global.exp}\n\n`;
   out += `地城（專案）\n`;
   const dungeons = Object.entries(state.dungeons).sort((a, b) => b[1].exp - a[1].exp);
@@ -281,14 +282,15 @@ function renderStatus(state) {
   for (const [name, d] of dungeons) out += lvLine(`【${name}】`, d.exp);
   out += `\n技能（能力 · 依分類小計，‹…› 為原始細項明細）\n`;
   const { groups, uncategorized } = categorizeSkills(state);
-  for (const g of groups) {
-    out += `  〔${g.group}〕\n`;
-    for (const c of g.cats) out += lvLineAt(c.name, c.exp, '    ', c.members.join('·'));
+  for (const grp of groups) {
+    out += `  〔${grp.group}〕\n`;
+    for (const c of grp.cats) out += lvLineAt(c.name, c.exp, '    ', c.members.join('·'));
   }
   if (uncategorized.length) {
     out += `  〔未分類〕← 建議補進 SKILL_GROUPS\n`;
     for (const u of uncategorized) out += lvLineAt(u.name, u.exp, '    ', '');
   }
+  if (derived) out += renderFuelDashboard(derived);              // v2.5 燃料儀表板
   out += `\n更新時間：${state.updated || '—'}\n`;
   return out;
 }
@@ -375,7 +377,7 @@ function parseSkills(flags) {
 function persist(p) {
   const state = computeState(readLog(p));
   writeState(state, p);
-  fs.writeFileSync(p.statusFile, renderStatus(state));
+  fs.writeFileSync(p.statusFile, renderStatus(state, readDerived(p)));
   return state;
 }
 function buildEvent(kind, reason, { dungeon, skills } = {}) {
@@ -692,6 +694,14 @@ function deriveAchievements(p = paths(), opts = {}) {
   return payload;
 }
 
+// 讀 achievements.json 的 derived 區（顯示層用）；缺檔/壞檔回 null（→ renderStatus 維持舊輸出）
+function readDerived(p = paths()) {
+  try {
+    const j = JSON.parse(fs.readFileSync(p.achievementsFile, 'utf8'));
+    return j && j.derived ? j.derived : null;
+  } catch { return null; }
+}
+
 // ---- CLI dispatch ----
 function die(msg) { console.error(msg); process.exit(1); }
 function need(val, msg) { if (!val) die(msg); return val; }
@@ -806,7 +816,7 @@ module.exports = {
   historyLines, writeView, safeName,
   buildEvent, stagePending, readPending, flushPending, flushSummaryText, removeEvents,
   loadConfig, expDeltaOf,
-  scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, deriveAchievements, // v2.5 衍生層
+  scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, deriveAchievements, readDerived, // v2.5 衍生層
   commandLevel, slayLevel, computeStreak, // v2.5 等級公式 + 連勤
   fmtYi, fmtWan, fmtUSD, eliteLevel, // v2.5 顯示層：數字格式 + 精英等級
   renderPanelLine, renderFuelDashboard, // v2.5 一行式四等級面板 + 燃料儀表板

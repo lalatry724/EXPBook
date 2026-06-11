@@ -64,3 +64,35 @@ test('renderFuelDashboard：委託/四分項人話/書本/時間/代價齊備', 
   assert.match(out, /對話 2129/);
   assert.match(out, /150\.2萬字.*28%/s); // typedChars 含 code，標 code%
 });
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+test('renderStatus 無 derived → 不含面板/儀表板（向後相容）', () => {
+  const out = exp.renderStatus(stateAt(18)); // 不傳 derived
+  assert.doesNotMatch(out, /\[等級\]/);
+  assert.doesNotMatch(out, /燃料儀表板/);
+  assert.match(out, /冒險者　LV18/); // 舊三層輸出仍在
+});
+
+test('renderStatus 有 derived → 疊一行面板 + 燃料儀表板', () => {
+  const out = exp.renderStatus(stateAt(18), {
+    elitePoints: 0, commandLevel: 22, slayLevel: 51, totalProcessed: 5.01e9, billable: 2.04e8, costUSD: 3990,
+    tierCount: { D: 1, C: 0, B: 0, A: 0, S: 0 }, flows: { input: 1, output: 1, cacheCreation: 1, cacheRead: 1 },
+    conversations: 2129, typedChars: 2082000, codePct: 0.28, activeHours: 116.6,
+  });
+  assert.match(out, /\[等級\] 冒險者18 精英0 指揮22 殺敵51/);
+  assert.match(out, /燃料儀表板/);
+});
+
+test('readDerived：讀 achievements.json 的 derived；缺檔回 null', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'expbook-rd-'));
+  try {
+    const p = exp.paths(home);
+    assert.strictEqual(exp.readDerived(p), null);             // 缺檔
+    fs.mkdirSync(path.dirname(p.achievementsFile), { recursive: true });
+    fs.writeFileSync(p.achievementsFile, JSON.stringify({ version: 'v2.5', derived: { commandLevel: 7 } }));
+    assert.strictEqual(exp.readDerived(p).commandLevel, 7);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
