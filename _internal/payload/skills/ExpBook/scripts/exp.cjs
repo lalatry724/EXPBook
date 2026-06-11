@@ -52,6 +52,32 @@ const PRICING = {
   haiku:  { in: 1,  out: 5,  cc: 1.25, cr: 0.1 },
 };
 
+// ---- v2.5 顯示層常數 ----
+const ELITE_BASE = 500;       // 精英 cost(1)
+const ELITE_RATIO = 1.2;      // 精英曲線比率（design §2.1 #017 定案 ×1.2）
+const ELITE_UNLOCK_LV = 50;   // 精英解鎖：冒險者需達 LV50（design §2.1）
+const BOOK_CHARS = 100000;    // 10 萬字 = 1 本（design §4.3 #027）
+const BOOK_RATE = 0.7;        // 計費等效 × 0.7 字/token
+const FLOW_LABEL = { input: '你新送進', output: 'AI寫出', cacheCreation: '首次建快取', cacheRead: '重複讀歷史' }; // design §4.2
+
+// ---- v2.5 顯示層：數字格式 ----
+function fmtYi(n, dp = 1) { return (Number(n || 0) / 1e8).toFixed(dp) + '億'; }      // token → 億（1 億=100M）
+function fmtWan(chars) { return (Number(chars || 0) / 10000).toFixed(1) + '萬字'; }  // 字元 → 萬字
+function fmtUSD(n) { return '$' + Math.round(Number(n || 0)).toLocaleString('en-US'); }
+
+// 精英分 → 精英等級：cost(n)=round(ELITE_BASE×ELITE_RATIO^(n-1))，累計達標升級（無硬上限）
+function eliteLevel(points) {
+  let p = Number(points || 0);
+  if (p <= 0) return 0;
+  let lv = 0, acc = 0;
+  while (lv < 100000) {                                   // 防爆上限
+    const next = Math.round(ELITE_BASE * Math.pow(ELITE_RATIO, lv)); // 升到 lv+1 的門檻
+    if (acc + next > p) break;
+    acc += next; lv++;
+  }
+  return lv;
+}
+
 // ---- 路徑 ----
 function resolveHome() {
   return process.env.EXPBOOK_HOME || path.join(os.homedir(), '.gemini', 'expbook');
@@ -219,9 +245,36 @@ function categorizeSkills(state) {
   return { groups, uncategorized };
 }
 
-function renderStatus(state) {
+// 一行式四等級面板（design §2.3）：左=會升級的榮譽（成果+投入），右=只增的代價
+function renderPanelLine(state, d) {
+  const advLv = levelFor(state.global.exp);
+  const eliteLv = advLv >= ELITE_UNLOCK_LV ? eliteLevel(d.elitePoints) : 0;
+  const lvs = `[等級] 冒險者${advLv} 精英${eliteLv} 指揮${d.commandLevel} 殺敵${d.slayLevel}`;
+  const cost = `[消耗] 魔力${fmtYi(d.totalProcessed, 1)}(有效${fmtYi(d.billable, 2)}) 金幣${fmtUSD(d.costUSD)}`;
+  return `${lvs}   ${cost}`;
+}
+
+// 燃料儀表板（design §4）：生涯統計、人話化、不升級、負面框架代價
+function renderFuelDashboard(d) {
+  const tc = d.tierCount || { D: 0, C: 0, B: 0, A: 0, S: 0 };
+  const f = d.flows || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+  const books = Math.round((d.billable || 0) * BOOK_RATE / BOOK_CHARS);
+  const codePct = Math.round((d.codePct || 0) * 100);
+  let out = `\n🔥 燃料儀表板（生涯統計·不升級）\n`;
+  out += `  委託討伐：D${tc.D} C${tc.C} B${tc.B} A${tc.A} S${tc.S}（精英分 ${d.elitePoints || 0}）\n`;
+  out += `  token 流量：${FLOW_LABEL.input} ${fmtYi(f.input, 2)}｜${FLOW_LABEL.output} ${fmtYi(f.output, 2)}｜`
+       + `${FLOW_LABEL.cacheCreation} ${fmtYi(f.cacheCreation, 2)}｜${FLOW_LABEL.cacheRead} ${fmtYi(f.cacheRead, 1)}\n`;
+  out += `  書本換算：約 ${books.toLocaleString('en-US')} 本（計費等效 × ${BOOK_RATE} 字/token，10 萬字=1 本）\n`;
+  out += `  使用時間 ${(d.activeHours || 0).toFixed(1)} hr｜對話 ${d.conversations || 0} 次｜`
+       + `打字 ${fmtWan(d.typedChars)}(code ${codePct}%)\n`;
+  out += `  代價：魔力 ${fmtYi(d.totalProcessed, 1)}(有效 ${fmtYi(d.billable, 2)})｜金幣 ${fmtUSD(d.costUSD)}\n`;
+  return out;
+}
+
+function renderStatus(state, derived = null) {
   const g = progressFor(state.global.exp);
   let out = `# EXP 玩家面板（冒險者公會）\n\n`;
+  if (derived) out += renderPanelLine(state, derived) + `\n\n`;   // v2.5 一行面板
   out += `冒險者　LV${g.lv} (${g.into}/${g.step}) Total:${state.global.exp}\n\n`;
   out += `地城（專案）\n`;
   const dungeons = Object.entries(state.dungeons).sort((a, b) => b[1].exp - a[1].exp);
@@ -229,14 +282,15 @@ function renderStatus(state) {
   for (const [name, d] of dungeons) out += lvLine(`【${name}】`, d.exp);
   out += `\n技能（能力 · 依分類小計，‹…› 為原始細項明細）\n`;
   const { groups, uncategorized } = categorizeSkills(state);
-  for (const g of groups) {
-    out += `  〔${g.group}〕\n`;
-    for (const c of g.cats) out += lvLineAt(c.name, c.exp, '    ', c.members.join('·'));
+  for (const grp of groups) {
+    out += `  〔${grp.group}〕\n`;
+    for (const c of grp.cats) out += lvLineAt(c.name, c.exp, '    ', c.members.join('·'));
   }
   if (uncategorized.length) {
     out += `  〔未分類〕← 建議補進 SKILL_GROUPS\n`;
     for (const u of uncategorized) out += lvLineAt(u.name, u.exp, '    ', '');
   }
+  if (derived) out += renderFuelDashboard(derived);              // v2.5 燃料儀表板
   out += `\n更新時間：${state.updated || '—'}\n`;
   return out;
 }
@@ -323,7 +377,7 @@ function parseSkills(flags) {
 function persist(p) {
   const state = computeState(readLog(p));
   writeState(state, p);
-  fs.writeFileSync(p.statusFile, renderStatus(state));
+  fs.writeFileSync(p.statusFile, renderStatus(state, readDerived(p)));
   return state;
 }
 function buildEvent(kind, reason, { dungeon, skills } = {}) {
@@ -640,6 +694,14 @@ function deriveAchievements(p = paths(), opts = {}) {
   return payload;
 }
 
+// 讀 achievements.json 的 derived 區（顯示層用）；缺檔/壞檔回 null（→ renderStatus 維持舊輸出）
+function readDerived(p = paths()) {
+  try {
+    const j = JSON.parse(fs.readFileSync(p.achievementsFile, 'utf8'));
+    return j && j.derived ? j.derived : null;
+  } catch { return null; }
+}
+
 // ---- CLI dispatch ----
 function die(msg) { console.error(msg); process.exit(1); }
 function need(val, msg) { if (!val) die(msg); return val; }
@@ -656,8 +718,12 @@ function main(argv) {
     case 'fail': addEvent('fail', need(pos[0], '請提供敗因：fail "<敗因>"'), opt()); break;
     case 'regress': addEvent('regress', need(pos[0], '請提供常錯：regress "<重犯的已知錯>"'), opt()); break;
     case 'status': {
-      const p = paths(); const s = persist(p);
-      console.log(`→ STATUS.md（冒險者 Lv${levelFor(s.global.exp)} EXP ${s.global.exp}）`);
+      const p = paths();
+      try { deriveAchievements(p); } catch (e) { console.error(`（derive 略過：${e.message}）`); } // 衍生失敗不擋面板
+      const s = persist(p);
+      const d = readDerived(p);
+      const tail = d ? `｜指揮Lv${d.commandLevel} 殺敵Lv${d.slayLevel}` : '';
+      console.log(`→ STATUS.md（冒險者 Lv${levelFor(s.global.exp)} EXP ${s.global.exp}${tail}）`);
       break;
     }
     case 'history': {
@@ -703,6 +769,8 @@ function main(argv) {
       } else {
         console.log('✓ flushed 0 筆');
       }
+      try { deriveAchievements(p); } catch (e) { console.error(`（derive 略過：${e.message}）`); }
+      persist(p); // 刷新 STATUS.md 面板（含 v2.5 一行面板 + 燃料儀表板）
       break;
     }
     case 'lastflush': {
@@ -725,9 +793,8 @@ function main(argv) {
       const p = paths();
       const r = deriveAchievements(p);
       const d = r.derived;
-      const 億 = (n) => (n / 1e8).toFixed(2) + '億';
       console.log(`✓ derive 完成 → ${p.achievementsFile}`);
-      console.log(`計費等效 ${億(d.billable)}｜總處理量 ${億(d.totalProcessed)}｜成本 $${d.costUSD.toFixed(0)}`);
+      console.log(`計費等效 ${fmtYi(d.billable, 2)}｜總處理量 ${fmtYi(d.totalProcessed, 1)}｜成本 ${fmtUSD(d.costUSD)}`);
       console.log(`對話 ${d.conversations} → 指揮Lv${d.commandLevel}｜打字 ${(d.typedChars/10000).toFixed(1)}萬字(code ${(d.codePct*100).toFixed(0)}%) → 殺敵Lv${d.slayLevel}`);
       console.log(`委託 D${d.tierCount.D}/C${d.tierCount.C}/B${d.tierCount.B}/A${d.tierCount.A}/S${d.tierCount.S}｜精英分 ${d.elitePoints}｜streak ${d.streak.current}(PR${d.streak.longest})`);
       console.log(`使用時間 ${d.activeHours.toFixed(1)}hr｜窗 ${d.window.files} 檔 ${d.window.messages} 訊息`);
@@ -754,8 +821,10 @@ module.exports = {
   historyLines, writeView, safeName,
   buildEvent, stagePending, readPending, flushPending, flushSummaryText, removeEvents,
   loadConfig, expDeltaOf,
-  scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, deriveAchievements, // v2.5 衍生層
+  scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, deriveAchievements, readDerived, // v2.5 衍生層
   commandLevel, slayLevel, computeStreak, // v2.5 等級公式 + 連勤
+  fmtYi, fmtWan, fmtUSD, eliteLevel, // v2.5 顯示層：數字格式 + 精英等級
+  renderPanelLine, renderFuelDashboard, // v2.5 一行式四等級面板 + 燃料儀表板
 };
 
 if (require.main === module) main(process.argv.slice(2));
