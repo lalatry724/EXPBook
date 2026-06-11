@@ -92,6 +92,21 @@ test('deriveAchievements 寫 achievements.json + last_scanned_ts', () => {
   } finally { fx.rm(home); fx.rm(root); }
 });
 
+test('殺敵等級用純打字(扣code)，不含 code 字元', () => {
+  const root = fx.tmpProjects([{ proj: 'p', file: 's.jsonl', lines: [
+    // 一則純文字 + 一則含 code fence；殺敵應只算扣掉 fence 後的字元
+    fx.userMsg('2026-06-01T10:00:00.000Z', 'x'.repeat(600 * 9)),          // 5400 純文字字元
+    fx.userMsg('2026-06-01T10:01:00.000Z', '```\n' + 'y'.repeat(600 * 16) + '\n```'), // code fence，整段算 codeChars
+  ] }]);
+  try {
+    const m = exp.deriveMetrics(exp.scanTranscripts(root), []);
+    const pure = m.typedChars - m.codeChars;            // 純打字
+    assert.strictEqual(m.slayLevel, exp.slayLevel(pure));
+    // 且應低於用「含 code 總量」算出的等級（證明確實扣了 code）
+    assert.strictEqual(m.slayLevel < exp.slayLevel(m.typedChars), true);
+  } finally { fx.rm(root); }
+});
+
 test('scanTranscripts 彙總 token/對話/打字（排除 tool_result 與 < 開頭）', () => {
   const root = fx.tmpProjects([{ proj: 'projA', file: 's1.jsonl', lines: [
     fx.asstMsg('2026-06-01T10:00:00.000Z', 'claude-opus-4-8', { in: 100, out: 200, cc: 300, cr: 9000 }),

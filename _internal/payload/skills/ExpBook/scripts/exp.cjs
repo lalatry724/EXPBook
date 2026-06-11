@@ -617,7 +617,7 @@ function deriveMetrics(scan, log) {
   base.tierCount = tierCount;
   base.elitePoints = elitePoints;
   base.commandLevel = commandLevel(base.conversations);
-  base.slayLevel = slayLevel(base.typedChars);
+  base.slayLevel = slayLevel(Math.max(0, base.typedChars - base.codeChars));
   base.streak = computeStreak(log, _todayStr());
   return base;
 }
