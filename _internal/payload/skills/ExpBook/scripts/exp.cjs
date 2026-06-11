@@ -430,7 +430,8 @@ const HELP = `ExpBook 指令（冒險者公會制；冒險者等級 + 地城(專
     stage --kind <task|lesson|chore|fail|regress> "<事由>" [--dungeon ..] [--skill ..]   暫存到 _pending（回顯 +EXP）
     flush                      把 _pending 全部沖進 log（Stop hook 每輪呼叫）；印本輪入帳明細
     lastflush                  顯示最近一次 flush 的「本輪 EXP 入帳」明細（什麼原因加了多少）
-  維運：rebuild ｜ init ｜ help
+  維運：rebuild ｜ derive ｜ init ｜ help
+    derive                     掃 transcript 重算衍生指標 → achievements.json
     remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除事件並重建 state（調整/回退某筆 EXP）
   調整 EXP 數值：編輯 ${path.join(resolveHome(), 'config.json')}  例 {"exp_of":{"task":150,"lesson":30}}（只影響之後新事件）
   預設 7 技能：${DEFAULT_SKILLS.join(' / ')}（可自由新增其他技能 tag）`;
@@ -718,6 +719,18 @@ function main(argv) {
       if (!removed.length) { console.log('（無符合項目）'); break; }
       for (const e of removed) console.log(`✗ removed  ${e.ts}  ${e.kind} +${e.exp ?? 0}｜${e.reason}`);
       console.log(`共移除 ${removed.length} 筆`);
+      break;
+    }
+    case 'derive': {
+      const p = paths();
+      const r = deriveAchievements(p);
+      const d = r.derived;
+      const 億 = (n) => (n / 1e8).toFixed(2) + '億';
+      console.log(`✓ derive 完成 → ${p.achievementsFile}`);
+      console.log(`計費等效 ${億(d.billable)}｜總處理量 ${億(d.totalProcessed)}｜成本 $${d.costUSD.toFixed(0)}`);
+      console.log(`對話 ${d.conversations} → 指揮Lv${d.commandLevel}｜打字 ${(d.typedChars/10000).toFixed(1)}萬字(code ${(d.codePct*100).toFixed(0)}%) → 殺敵Lv${d.slayLevel}`);
+      console.log(`委託 D${d.tierCount.D}/C${d.tierCount.C}/B${d.tierCount.B}/A${d.tierCount.A}/S${d.tierCount.S}｜精英分 ${d.elitePoints}｜streak ${d.streak.current}(PR${d.streak.longest})`);
+      console.log(`使用時間 ${d.activeHours.toFixed(1)}hr｜窗 ${d.window.files} 檔 ${d.window.messages} 訊息`);
       break;
     }
     case 'rebuild': {
