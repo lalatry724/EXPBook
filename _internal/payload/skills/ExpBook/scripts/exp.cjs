@@ -144,13 +144,13 @@ function buildBadgeContext(state, log, d) {
 function evalBadges(ctx) {
   return ACHIEVEMENTS.filter((b) => { try { return !!b.cond(ctx); } catch { return false; } }).map((b) => b.id);
 }
-// 稱號：已解鎖徽章中「最高稀有度 → 同稀有度取最新解鎖 ts」；pin 非空直接覆寫（config.json title_pin）
+// 稱號：已解鎖徽章中「最高稀有度 → 同稀有度取最新解鎖 ts」；隱藏徽章不列入稱號候選；pin 非空直接覆寫（config.json title_pin）
 function deriveTitle(unlocked, pin) {
   if (pin) return pin;
   const ids = Object.keys(unlocked || {});
   let best = null;
   for (const id of ids) {
-    const b = badgeById(id); if (!b) continue;
+    const b = badgeById(id); if (!b || b.hidden) continue; // 隱藏徽章不作稱號
     const ts = unlocked[id] || '';
     if (!best) { best = { b, ts }; continue; }
     const dr = RARITY_RANK[b.rarity] - RARITY_RANK[best.b.rarity];
@@ -248,6 +248,12 @@ function loadConfig(p = paths()) {
   } catch { return {}; }
 }
 loadConfig(); // 載入模組時即套用使用者覆寫（若 config.json 存在）
+
+// 稱號釘選覆寫：config.json 的 title_pin（沿用既有 config 覆寫機制；STATUS.md 為輸出檔不可當輸入）
+function loadTitlePin(p = paths()) {
+  try { const c = JSON.parse(fs.readFileSync(p.configFile, 'utf8')); return c && typeof c.title_pin === 'string' && c.title_pin ? c.title_pin : null; }
+  catch { return null; }
+}
 
 // ---- 等級數學 ----
 function levelFor(exp) { return Math.floor(exp / LEVEL_STEP) + 1; }
@@ -412,11 +418,30 @@ function renderFuelDashboard(d) {
   return out;
 }
 
-function renderStatus(state, derived = null) {
+// 徽章區塊（design §3.1/3.5）：依類別列；隱藏徽章解鎖後才現身；附 PR 個人紀錄列
+function renderBadges(ach) {
+  const unlocked = ach.unlocked || {};
+  const ids = new Set(Object.keys(unlocked));
+  const visible = ACHIEVEMENTS.filter((b) => !b.hidden || ids.has(b.id));
+  let out = `\n🏅 徽章（${ids.size}/${visible.length}）\n`;
+  const cats = [];
+  for (const b of visible) if (!cats.includes(b.cat)) cats.push(b.cat);
+  for (const cat of cats) {
+    const items = visible.filter((b) => b.cat === cat);
+    out += `  〔${cat}〕 ` + items.map((b) => `${b.name}(${b.rarity})${ids.has(b.id) ? '✓' : '·'}`).join(' ') + '\n';
+  }
+  const r = ach.records || {};
+  out += `🏆 個人紀錄：單日最高 ${fmtYi(r.maxDayToken, 2)}｜單日最多字 ${fmtWan(r.maxDayChars)}｜`
+       + `單委託最大 ${fmtYi(r.maxQuest, 2)}｜最長連戰 ${r.longestStreak || 0} 日\n`;
+  return out;
+}
+
+function renderStatus(state, derived = null, ach = null) {
   const g = progressFor(state.global.exp);
+  const title = ach ? deriveTitle(ach.unlocked, ach.titlePin) : null;
   let out = `# EXP 玩家面板（冒險者公會）\n\n`;
-  if (derived) out += renderPanelLine(state, derived) + `\n\n`;   // v2.5 一行面板
-  out += `冒險者　LV${g.lv} (${g.into}/${g.step}) Total:${state.global.exp}\n\n`;
+  if (derived) out += renderPanelLine(state, derived) + `\n\n`;
+  out += `冒險者　LV${g.lv}${title ? `〈${title}〉` : ''} (${g.into}/${g.step}) Total:${state.global.exp}\n\n`;
   out += `地城（專案）\n`;
   const dungeons = Object.entries(state.dungeons).sort((a, b) => b[1].exp - a[1].exp);
   if (!dungeons.length) out += `  （尚無）\n`;
@@ -431,7 +456,8 @@ function renderStatus(state, derived = null) {
     out += `  〔未分類〕← 建議補進 SKILL_GROUPS\n`;
     for (const u of uncategorized) out += lvLineAt(u.name, u.exp, '    ', '');
   }
-  if (derived) out += renderFuelDashboard(derived);              // v2.5 燃料儀表板
+  if (derived) out += renderFuelDashboard(derived);
+  if (ach) out += renderBadges(ach);
   out += `\n更新時間：${state.updated || '—'}\n`;
   return out;
 }
@@ -518,7 +544,9 @@ function parseSkills(flags) {
 function persist(p) {
   const state = computeState(readLog(p));
   writeState(state, p);
-  fs.writeFileSync(p.statusFile, renderStatus(state, readDerived(p)));
+  const ach = readAchievements(p);
+  if (ach) ach.titlePin = loadTitlePin(p);
+  fs.writeFileSync(p.statusFile, renderStatus(state, ach ? ach.derived : null, ach));
   return state;
 }
 function buildEvent(kind, reason, { dungeon, skills } = {}) {
@@ -948,8 +976,18 @@ function main(argv) {
       } else {
         console.log('✓ flushed 0 筆');
       }
-      try { deriveAchievements(p); } catch (e) { console.error(`（derive 略過：${e.message}）`); }
-      persist(p); // 刷新 STATUS.md 面板（含 v2.5 一行面板 + 燃料儀表板）
+      let res = null;
+      try { res = deriveAchievements(p); } catch (e) { console.error(`（derive 略過：${e.message}）`); }
+      persist(p); // 刷新 STATUS.md（含面板/儀表板/徽章）
+      if (res) { // v2.5 Plan3 四元素 flush 一行（薄 AI、無 EXP）
+        for (const id of res._newly) { const b = badgeById(id); if (b) console.log(`🏅 解鎖徽章【${b.name}】(${b.rarity})`); }
+        const ach = readAchievements(p) || {};
+        const egg = ach.egg || {};
+        const line = pickEasterEgg(res.derived, egg, res._prs, _todayStr());
+        if (line) console.log(line);
+        ach.egg = egg;
+        try { fs.writeFileSync(p.achievementsFile, JSON.stringify(ach, null, 2)); } catch {}
+      }
       break;
     }
     case 'lastflush': {
@@ -1006,6 +1044,7 @@ module.exports = {
   renderPanelLine, renderFuelDashboard, // v2.5 一行式四等級面板 + 燃料儀表板
   RARITY_RANK, ACHIEVEMENTS, badgeById, buildBadgeContext, evalBadges, // v2.5 Plan3 徽章
   deriveTitle, mergeRecords, recordPRs, pickEasterEgg, RARE_LINES,
+  loadTitlePin, renderBadges, // v2.5 Plan3 顯示層
 };
 
 if (require.main === module) main(process.argv.slice(2));

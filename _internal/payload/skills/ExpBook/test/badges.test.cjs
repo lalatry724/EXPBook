@@ -159,3 +159,27 @@ test('pickEasterEgg 稀有遭遇：rng<0.03 命中純台詞', () => {
   const line = exp.pickEasterEgg({ streak: { current: 1 }, totalProcessed: 0 }, egg, [], '2026-06-11', () => 0.01);
   assert.ok(exp.RARE_LINES.includes(line));
 });
+
+test('renderStatus 疊稱號/徽章/PR；無 ach 維持 Plan2 輸出', () => {
+  const LEVEL_STEP = exp.LEVEL_STEP;
+  const st = { global: { exp: 17 * LEVEL_STEP }, dungeons: {}, skills: {}, updated: '2026-06-11 12:00:00' };
+  const derived = { elitePoints: 0, commandLevel: 22, slayLevel: 51, totalProcessed: 5e9, billable: 2e8, costUSD: 3990,
+    tierCount: { D: 1, C: 0, B: 0, A: 0, S: 0 }, flows: { input: 1, output: 1, cacheCreation: 1, cacheRead: 1 },
+    conversations: 2129, typedChars: 2082000, codePct: 0.28, activeHours: 116.6, streak: { current: 3, longest: 9 } };
+  const ach = { unlocked: { cmd_50: '2026-06-03 10:00:00', first_task: '2026-06-01 10:00:00', burn_3k_secret: '2026-06-05 10:00:00' },
+    records: { maxDayToken: 1.75e7, maxDayChars: 8000, maxQuest: 1.7e7, longestStreak: 9 }, titlePin: null };
+  const out = exp.renderStatus(st, derived, ach);
+  assert.match(out, /冒險者　LV18〈沙場宿將〉/);
+  assert.match(out, /🏅 徽章（3\//);
+  assert.match(out, /你知道燒了多少嗎\(SR\)✓/);
+  assert.match(out, /🏆 個人紀錄/);
+  const plain = exp.renderStatus(st, derived);
+  assert.doesNotMatch(plain, /🏅 徽章/);
+  assert.doesNotMatch(plain, /〈/);
+});
+
+test('renderBadges：隱藏徽章未解鎖不顯示', () => {
+  const out = exp.renderBadges({ unlocked: { first_task: '2026-06-01 10:00:00' }, records: {} });
+  assert.match(out, /初試啼聲\(N\)✓/);
+  assert.doesNotMatch(out, /你知道燒了多少嗎/);
+});
