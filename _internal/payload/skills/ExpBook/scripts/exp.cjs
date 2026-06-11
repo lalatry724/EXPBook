@@ -552,7 +552,8 @@ function _isToolResult(content) {
 function _emptyScan() {
   return { tok: { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 }, byModel: {}, billable: 0, totalProcessed: 0,
     messages: [], tsList: [], perSession: [], perDay: {}, userTurns: 0, userChars: 0, codeChars: 0,
-    msgCount: 0, fileCount: 0, minTs: null, maxTs: null };
+    msgCount: 0, fileCount: 0, minTs: null, maxTs: null,
+    perDayTurns: {}, perDayChars: {}, sessionSpans: [] };
 }
 function scanTranscripts(root = projectsRoot()) {
   const tok = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
@@ -563,6 +564,9 @@ function scanTranscripts(root = projectsRoot()) {
   const perDay = {};                   // 'YYYY-MM-DD' → 計費等效
   let userTurns = 0, userChars = 0, codeChars = 0, msgCount = 0, fileCount = 0;
   let minTs = null, maxTs = null;
+  const perDayTurns = {};
+  const perDayChars = {};
+  const sessionSpans = [];
   if (!fs.existsSync(root)) return _emptyScan();
   const walk = (dir) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -571,6 +575,8 @@ function scanTranscripts(root = projectsRoot()) {
       if (!e.name.endsWith('.jsonl')) continue;
       fileCount++;
       let sessBill = 0;
+      let sessMin = null, sessMax = null;
+      const fileTsList = [];
       for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
         if (!line.trim()) continue;
         let o; try { o = JSON.parse(line); } catch { continue; }
@@ -581,8 +587,11 @@ function scanTranscripts(root = projectsRoot()) {
         const tsMs = tsRaw ? Date.parse(tsRaw) : null;
         if (tsMs != null && !Number.isNaN(tsMs)) {
           tsList.push(tsMs);
+          fileTsList.push(tsMs);
           if (minTs == null || tsMs < minTs) minTs = tsMs;
           if (maxTs == null || tsMs > maxTs) maxTs = tsMs;
+          if (sessMin == null || tsMs < sessMin) sessMin = tsMs;
+          if (sessMax == null || tsMs > sessMax) sessMax = tsMs;
         }
         if (u && role === 'assistant') {
           tok.input += u.input_tokens || 0;
@@ -602,18 +611,30 @@ function scanTranscripts(root = projectsRoot()) {
           const t = _txtOf(msg.content);
           if (t && !t.startsWith('<')) {            // 排除系統注入（startsWith('<') 粗濾）
             userTurns++; userChars += [...t].length;
+            const day = tsRaw ? tsRaw.slice(0, 10) : null;
+            if (day) { perDayTurns[day] = (perDayTurns[day] || 0) + 1; perDayChars[day] = (perDayChars[day] || 0) + [...t].length; }
             for (const f of (t.match(/```[\s\S]*?```/g) || [])) codeChars += [...f].length;
           }
         }
       }
       if (sessBill > 0) perSession.push(sessBill);
+      // split file timestamps by calendar day and record each day-session's span
+      if (fileTsList.length > 0) {
+        const byDay = {};
+        for (const ms of fileTsList) { const d = new Date(ms).toISOString().slice(0, 10); (byDay[d] || (byDay[d] = [])).push(ms); }
+        for (const arr of Object.values(byDay)) {
+          const mn = Math.min(...arr), mx = Math.max(...arr);
+          if (mx > mn) sessionSpans.push(mx - mn);
+        }
+      }
     }
   };
   walk(root);
   const billable = tok.input + tok.output + tok.cacheCreation;
   return { tok, byModel, billable, totalProcessed: billable + tok.cacheRead,
     messages, tsList, perSession, perDay, userTurns, userChars, codeChars, // perSession/perDay：Plan 2 分位校準/每日里程碑用
-    msgCount, fileCount, minTs, maxTs };
+    msgCount, fileCount, minTs, maxTs,
+    perDayTurns, perDayChars, sessionSpans };
 }
 
 // 使用時間：相鄰訊息 gap<15 分才累加，回傳小時
@@ -679,6 +700,15 @@ function deriveMetrics(scan, log) {
   base.commandLevel = commandLevel(base.conversations);
   base.slayLevel = slayLevel(Math.max(0, base.typedChars - base.codeChars));
   base.streak = computeStreak(log, _todayStr());
+  const maxVal = (m) => { const v = Object.values(m || {}); return v.length ? Math.max(...v) : 0; };
+  base.maxDayToken = maxVal(scan.perDay);
+  base.maxDayChars = maxVal(scan.perDayChars);
+  base.maxDayConversations = maxVal(scan.perDayTurns);
+  base.maxSessionHours = (scan.sessionSpans && scan.sessionSpans.length ? Math.max(...scan.sessionSpans) : 0) / 3600000;
+  const byDay = {};
+  for (const ms of scan.tsList) { const d = new Date(ms).toISOString().slice(0, 10); (byDay[d] || (byDay[d] = [])).push(ms); }
+  base.maxDayActiveHours = Object.values(byDay).reduce((mx, arr) => Math.max(mx, activeHours(arr)), 0);
+  base.maxQuestBillable = quests.length ? Math.max(...quests.map((q) => q.billable)) : 0;
   return base;
 }
 

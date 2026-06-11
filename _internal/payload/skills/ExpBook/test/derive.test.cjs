@@ -129,3 +129,35 @@ test('scanTranscripts 彙總 token/對話/打字（排除 tool_result 與 < 開�
     assert.strictEqual(s.messages.length >= 1, true); // 至少 assistant 那筆有 billable
   } finally { fx.rm(root); }
 });
+
+test('scanTranscripts 補單日對話/字數/單session時長聚合', () => {
+  const root = fx.tmpProjects([{ proj: 'p', file: 's.jsonl', lines: [
+    fx.asstMsg('2026-06-01T10:00:00.000Z', 'claude-opus-4-8', { in: 100, out: 0, cc: 0, cr: 0 }),
+    fx.userMsg('2026-06-01T10:00:00.000Z', 'abcde'),
+    fx.userMsg('2026-06-01T16:00:00.000Z', 'fghij'),
+    fx.userMsg('2026-06-02T10:00:00.000Z', 'kl'),
+  ] }]);
+  try {
+    const s = exp.scanTranscripts(root);
+    assert.strictEqual(s.perDayTurns['2026-06-01'], 2);
+    assert.strictEqual(s.perDayTurns['2026-06-02'], 1);
+    assert.strictEqual(s.perDayChars['2026-06-01'], 10);
+    assert.strictEqual(Math.round(s.sessionSpans[0] / 3600000), 6);
+  } finally { fx.rm(root); }
+});
+
+test('deriveMetrics 補 PR/習慣聚合欄', () => {
+  const root = fx.tmpProjects([{ proj: 'p', file: 's.jsonl', lines: [
+    fx.asstMsg('2026-06-01T10:00:00.000Z', 'claude-opus-4-8', { in: 5e5, out: 0, cc: 0, cr: 0 }),
+    fx.userMsg('2026-06-01T10:01:00.000Z', 'x'.repeat(120)),
+  ] }]);
+  try {
+    const m = exp.deriveMetrics(exp.scanTranscripts(root), []);
+    assert.strictEqual(m.maxDayToken, 5e5);
+    assert.strictEqual(m.maxDayChars, 120);
+    assert.strictEqual(m.maxDayConversations, 1);
+    assert.strictEqual(typeof m.maxSessionHours, 'number');
+    assert.strictEqual(typeof m.maxDayActiveHours, 'number');
+    assert.strictEqual(m.maxQuestBillable, 0);
+  } finally { fx.rm(root); }
+});
