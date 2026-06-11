@@ -32,6 +32,10 @@ const SKILL_GROUPS = [
   ] },
 ];
 
+// ---- v2.5 衍生層常數 ----
+const BILLABLE = (u) => (u.input_tokens||0) + (u.output_tokens||0) + (u.cache_creation_input_tokens||0); // 排除 cache_read
+function projectsRoot() { return path.join(os.homedir(), '.claude', 'projects'); }
+
 // ---- 路徑 ----
 function resolveHome() {
   return process.env.EXPBOOK_HOME || path.join(os.homedir(), '.claude', 'expbook');
@@ -414,6 +418,86 @@ const HELP = `ExpBook 指令（冒險者公會制；冒險者等級 + 地城(專
   調整 EXP 數值：編輯 ${path.join(resolveHome(), 'config.json')}  例 {"exp_of":{"task":150,"lesson":30}}（只影響之後新事件）
   預設 7 技能：${DEFAULT_SKILLS.join(' / ')}（可自由新增其他技能 tag）`;
 
+// ---- v2.5 衍生層：掃 transcript 原始彙總 ----
+function _txtOf(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    let s = '';
+    for (const b of content) if (b && b.type === 'text' && typeof b.text === 'string') s += b.text;
+    return s;
+  }
+  return '';
+}
+function _isToolResult(content) {
+  return Array.isArray(content) && content.some((b) => b && b.type === 'tool_result');
+}
+function _emptyScan() {
+  return { tok: { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 }, byModel: {}, billable: 0, totalProcessed: 0,
+    messages: [], tsList: [], perSession: [], perDay: {}, userTurns: 0, userChars: 0, codeChars: 0,
+    msgCount: 0, fileCount: 0, minTs: null, maxTs: null };
+}
+function scanTranscripts(root = projectsRoot()) {
+  const tok = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+  const byModel = {};
+  const messages = [];                 // {ts:ms, billable} 供委託區間 join（僅含有 usage 的訊息）
+  const tsList = [];                   // 所有訊息 timestamp（ms）供使用時間
+  const perSession = [];               // 每檔計費等效
+  const perDay = {};                   // 'YYYY-MM-DD' → 計費等效
+  let userTurns = 0, userChars = 0, codeChars = 0, msgCount = 0, fileCount = 0;
+  let minTs = null, maxTs = null;
+  if (!fs.existsSync(root)) return _emptyScan();
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { walk(p); continue; }
+      if (!e.name.endsWith('.jsonl')) continue;
+      fileCount++;
+      let sessBill = 0;
+      for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
+        if (!line.trim()) continue;
+        let o; try { o = JSON.parse(line); } catch { continue; }
+        const msg = o.message || o;
+        const role = msg.role || o.type;
+        const u = msg.usage;
+        const tsRaw = o.timestamp;
+        const tsMs = tsRaw ? Date.parse(tsRaw) : null;
+        if (tsMs != null && !Number.isNaN(tsMs)) {
+          tsList.push(tsMs);
+          if (minTs == null || tsMs < minTs) minTs = tsMs;
+          if (maxTs == null || tsMs > maxTs) maxTs = tsMs;
+        }
+        if (u && role === 'assistant') {
+          tok.input += u.input_tokens || 0;
+          tok.output += u.output_tokens || 0;
+          tok.cacheCreation += u.cache_creation_input_tokens || 0;
+          tok.cacheRead += u.cache_read_input_tokens || 0;
+          const m = msg.model || 'unknown';
+          const bm = byModel[m] || (byModel[m] = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 });
+          bm.input += u.input_tokens || 0; bm.output += u.output_tokens || 0;
+          bm.cacheCreation += u.cache_creation_input_tokens || 0; bm.cacheRead += u.cache_read_input_tokens || 0;
+          const b = BILLABLE(u);
+          sessBill += b;
+          if (tsMs != null) { messages.push({ ts: tsMs, billable: b }); perDay[tsRaw.slice(0, 10)] = (perDay[tsRaw.slice(0, 10)] || 0) + b; }
+          msgCount++;
+        }
+        if (role === 'user' && msg.content != null && !_isToolResult(msg.content)) {
+          const t = _txtOf(msg.content);
+          if (t && !t.startsWith('<')) {            // 排除系統注入（startsWith('<') 粗濾）
+            userTurns++; userChars += [...t].length;
+            for (const f of (t.match(/```[\s\S]*?```/g) || [])) codeChars += [...f].length;
+          }
+        }
+      }
+      if (sessBill > 0) perSession.push(sessBill);
+    }
+  };
+  walk(root);
+  const billable = tok.input + tok.output + tok.cacheCreation;
+  return { tok, byModel, billable, totalProcessed: billable + tok.cacheRead,
+    messages, tsList, perSession, perDay, userTurns, userChars, codeChars,
+    msgCount, fileCount, minTs, maxTs };
+}
+
 // ---- CLI dispatch ----
 function die(msg) { console.error(msg); process.exit(1); }
 function need(val, msg) { if (!val) die(msg); return val; }
@@ -516,6 +600,7 @@ module.exports = {
   historyLines, writeView, safeName,
   buildEvent, stagePending, readPending, flushPending, flushSummaryText, removeEvents,
   loadConfig, expDeltaOf,
+  scanTranscripts, // v2.5 衍生層
 };
 
 if (require.main === module) main(process.argv.slice(2));
