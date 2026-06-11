@@ -52,6 +52,19 @@ const PRICING = {
   haiku:  { in: 1,  out: 5,  cc: 1.25, cr: 0.1 },
 };
 
+// ---- v2.5 顯示層常數 ----
+const ELITE_BASE = 500;       // 精英 cost(1)
+const ELITE_RATIO = 1.2;      // 精英曲線比率（design §2.1 #017 定案 ×1.2）
+const ELITE_UNLOCK_LV = 50;   // 精英解鎖：冒險者需達 LV50（design §2.1）
+const BOOK_CHARS = 100000;    // 10 萬字 = 1 本（design §4.3 #027）
+const BOOK_RATE = 0.7;        // 計費等效 × 0.7 字/token
+const FLOW_LABEL = { input: '你新送進', output: 'AI寫出', cacheCreation: '首次建快取', cacheRead: '重複讀歷史' }; // design §4.2
+
+// ---- v2.5 顯示層：數字格式 ----
+function fmtYi(n, dp = 1) { return (Number(n || 0) / 1e8).toFixed(dp) + '億'; }      // token → 億（1 億=100M）
+function fmtWan(chars) { return (Number(chars || 0) / 10000).toFixed(1) + '萬字'; }  // 字元 → 萬字
+function fmtUSD(n) { return '$' + Math.round(Number(n || 0)).toLocaleString('en-US'); }
+
 // ---- 路徑 ----
 function resolveHome() {
   return process.env.EXPBOOK_HOME || path.join(os.homedir(), '.gemini', 'expbook');
@@ -756,6 +769,7 @@ module.exports = {
   loadConfig, expDeltaOf,
   scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, deriveAchievements, // v2.5 衍生層
   commandLevel, slayLevel, computeStreak, // v2.5 等級公式 + 連勤
+  fmtYi, fmtWan, fmtUSD, // v2.5 顯示層：數字格式
 };
 
 if (require.main === module) main(process.argv.slice(2));
