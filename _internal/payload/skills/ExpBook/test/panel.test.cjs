@@ -32,16 +32,16 @@ const LEVEL_STEP = exp.LEVEL_STEP; // 冒險者每級門檻
 function stateAt(lv) { return { global: { exp: (lv - 1) * LEVEL_STEP }, dungeons: {}, skills: {} }; }
 const D = { elitePoints: 5000, commandLevel: 22, slayLevel: 51, totalProcessed: 5.01e9, billable: 2.04e8, costUSD: 3990 };
 
-test('renderPanelLine：LV50 前精英顯示 0（解鎖閘）', () => {
+test('renderPanelLine：精英不顯示（已移為 feature），等級行只有 冒險者/指揮/殺敵', () => {
   const line = exp.renderPanelLine(stateAt(18), D);
-  assert.match(line, /\[等級\] 冒險者18 精英0 指揮22 殺敵51/);
+  assert.match(line, /\[等級\] 冒險者18 指揮22 殺敵51/);
+  assert.doesNotMatch(line, /精英/);                       // 任何等級都不顯示精英
   assert.match(line, /\[消耗\] 魔力50\.1億\(有效2\.04億\) 金幣\$3,990/);
 });
 
-test('renderPanelLine：LV50 後精英用 eliteLevel 換算', () => {
+test('renderPanelLine：LV50 後仍不顯示精英', () => {
   const line = exp.renderPanelLine(stateAt(50), D);
-  assert.match(line, /精英\d+/);
-  assert.doesNotMatch(line.split('指揮')[0], /精英0\b/); // 5000 分 → 精英 > 0
+  assert.doesNotMatch(line, /精英/);
 });
 
 test('renderFuelDashboard：委託/四分項人話/書本/時間/代價齊備', () => {
@@ -54,7 +54,7 @@ test('renderFuelDashboard：委託/四分項人話/書本/時間/代價齊備', 
   const out = exp.renderFuelDashboard(d);
   assert.match(out, /委託討伐.*D54 C60 B58 A35 S24/s);
   assert.match(out, /精英分 1234/);
-  assert.match(out, /你新送進/);
+  assert.match(out, /輸入/);
   assert.match(out, /AI寫出/);
   assert.match(out, /首次建快取/);
   assert.match(out, /重複讀歷史/);
@@ -82,8 +82,18 @@ test('renderStatus 有 derived → 疊一行面板 + 燃料儀表板', () => {
     tierCount: { D: 1, C: 0, B: 0, A: 0, S: 0 }, flows: { input: 1, output: 1, cacheCreation: 1, cacheRead: 1 },
     conversations: 2129, typedChars: 2082000, codePct: 0.28, activeHours: 116.6,
   });
-  assert.match(out, /\[等級\] 冒險者18 精英0 指揮22 殺敵51/);
+  assert.match(out, /\[等級\] 冒險者18 指揮22 殺敵51/);
   assert.match(out, /燃料儀表板/);
+});
+
+test('renderStatus 投入軸詳列：指揮/殺敵 同款 LV/進度/Total 行', () => {
+  const out = exp.renderStatus(stateAt(18), {
+    elitePoints: 0, commandLevel: 3, slayLevel: 2, totalProcessed: 5e9, billable: 2e8, costUSD: 4000,
+    tierCount: { D: 0, C: 0, B: 0, A: 0, S: 0 }, flows: { input: 1, output: 1, cacheCreation: 1, cacheRead: 1 },
+    conversations: 2334, typedChars: 2442000, codeChars: 683760,
+  });
+  assert.match(out, /指揮　　LV3 \(334\/1000\) Total:2334 次對話/);        // ⌊2334/1000⌋+1=3，當級 334
+  assert.match(out, /殺敵　　LV2 \(75\.8萬字\/100\.0萬字\) Total:175\.8萬字（純打字）/); // 純打字 1,758,240 → +1=2
 });
 
 test('readDerived：讀 achievements.json 的 derived；缺檔回 null', () => {

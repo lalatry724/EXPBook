@@ -35,36 +35,33 @@ test('deriveMetrics 算出四分項/對話/打字/時間/成本', () => {
   } finally { fx.rm(root); }
 });
 
-test('classifyTier 依界線分級', () => {
-  assert.strictEqual(exp.classifyTier(100000).tier, 'D');
-  assert.strictEqual(exp.classifyTier(200000).tier, 'C');
-  assert.strictEqual(exp.classifyTier(2000000).tier, 'S');
+test('classifyTier 依界線分級（per-day 5M/10M/30M/50M）', () => {
+  assert.strictEqual(exp.classifyTier(3000000).tier, 'D');   // <5M
+  assert.strictEqual(exp.classifyTier(7000000).tier, 'C');   // 5–10M
+  assert.strictEqual(exp.classifyTier(20000000).tier, 'B');  // 10–30M
+  assert.strictEqual(exp.classifyTier(40000000).tier, 'A');  // 30–50M
+  assert.strictEqual(exp.classifyTier(60000000).tier, 'S');  // >50M
 });
 
-test('questsByTaskInterval 區間歸屬 + 跨 session 合併', () => {
-  const t1 = exp.fmtTs(new Date(Date.UTC(2026,5,1,10,0,0)));
-  const t2 = exp.fmtTs(new Date(Date.UTC(2026,5,1,12,0,0)));
-  const log = [
-    { ts: t1, kind: 'task', reason: '委託一' },
-    { ts: t2, kind: 'task', reason: '委託二' },
-  ];
-  const scan = { messages: [
-    { ts: Date.UTC(2026,5,1,9,30,0),  billable: 50000 },   // → 委託一（≤t1）
-    { ts: Date.UTC(2026,5,1,11,0,0),  billable: 200000 },  // → 委託二（t1<..≤t2）
-    { ts: Date.UTC(2026,5,1,13,0,0),  billable: 999 },     // → t2 之後，無 task，不形成委託
-  ] };
-  const quests = exp.questsByTaskInterval(scan, log);
-  assert.strictEqual(quests.length, 2);
-  assert.strictEqual(quests[0].billable, 50000);
-  assert.strictEqual(quests[0].tier, 'D');
-  assert.strictEqual(quests[1].billable, 200000);
-  assert.strictEqual(quests[1].tier, 'C');
+test('questsByDay：一天一委託、依日彙總分級、按日期排序、下限過濾', () => {
+  const scan = { perDay: {
+    '2026-06-09': 36000000, '2026-05-08': 3000000, '2026-06-01': 7000000,
+    '2026-04-30': 50000,    // < 10 萬下限 → 不算委託，應被過濾
+  } };
+  const quests = exp.questsByDay(scan);
+  assert.strictEqual(quests.length, 3);                                              // 下限日不計
+  assert.deepStrictEqual(quests.map((q) => q.day), ['2026-05-08', '2026-06-01', '2026-06-09']); // 排序、無 04-30
+  assert.deepStrictEqual(quests.map((q) => q.tier), ['D', 'C', 'A']);
+  assert.strictEqual(quests[2].billable, 36000000);
 });
 
-test('commandLevel / slayLevel 平方根公式', () => {
-  assert.strictEqual(exp.commandLevel(2129), 23); // ⌊√(2129/4)⌋ = ⌊23.07⌋
-  assert.strictEqual(exp.slayLevel(1502000), 50); // ⌊√(1502000/600)⌋ = ⌊50.03⌋
-  assert.strictEqual(exp.commandLevel(0), 0);
+test('commandLevel / slayLevel 線性除數公式（1-based，預設 Lv1）', () => {
+  assert.strictEqual(exp.commandLevel(2333), 3);    // ⌊2333/1000⌋+1
+  assert.strictEqual(exp.commandLevel(999), 1);     // 不足 1000 → 預設 Lv1（不浮灌）
+  assert.strictEqual(exp.slayLevel(1758240), 2);    // ⌊1758240/1e6⌋+1（純打字 175.8 萬）
+  assert.strictEqual(exp.slayLevel(999999), 1);     // 不足 100 萬字 → 預設 Lv1
+  assert.strictEqual(exp.commandLevel(0), 1);       // 零輸入也是 Lv1
+  assert.deepStrictEqual(exp.progressBy(2334, 1000), { lv: 3, into: 334, step: 1000, toNext: 666 });
 });
 
 test('computeStreak 連續活躍日 + 護符抵斷', () => {
@@ -95,8 +92,8 @@ test('deriveAchievements 寫 achievements.json + last_scanned_ts', () => {
 test('殺敵等級用純打字(扣code)，不含 code 字元', () => {
   const root = fx.tmpProjects([{ proj: 'p', file: 's.jsonl', lines: [
     // 一則純文字 + 一則含 code fence；殺敵應只算扣掉 fence 後的字元
-    fx.userMsg('2026-06-01T10:00:00.000Z', 'x'.repeat(600 * 9)),          // 5400 純文字字元
-    fx.userMsg('2026-06-01T10:01:00.000Z', '```\n' + 'y'.repeat(600 * 16) + '\n```'), // code fence，整段算 codeChars
+    fx.userMsg('2026-06-01T10:00:00.000Z', 'x'.repeat(1000000)),          // 100 萬純文字 → 純打字 Lv1
+    fx.userMsg('2026-06-01T10:01:00.000Z', '```\n' + 'y'.repeat(1000000) + '\n```'), // code fence，整段算 codeChars（含 code 總量會多 1 級）
   ] }]);
   try {
     const m = exp.deriveMetrics(exp.scanTranscripts(root), []);
@@ -164,7 +161,7 @@ test('deriveMetrics 補 PR/習慣聚合欄', () => {
     assert.strictEqual(m.maxDayConversations, 1);
     assert.strictEqual(typeof m.maxSessionHours, 'number');
     assert.strictEqual(typeof m.maxDayActiveHours, 'number');
-    assert.strictEqual(m.maxQuestBillable, 0);
+    assert.strictEqual(m.maxQuestBillable, 5e5); // 單日 50 萬 ≥ 10 萬下限 → 形成委託
   } finally { fx.rm(root); }
 });
 

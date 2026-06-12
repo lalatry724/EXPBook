@@ -34,13 +34,14 @@ const SKILL_GROUPS = [
 
 // ---- v2.5 衍生層常數 ----
 const BILLABLE = (u) => (u.input_tokens||0) + (u.output_tokens||0) + (u.cache_creation_input_tokens||0); // 排除 cache_read
-// 委託界線（計費等效 token；design §4.1，錨真實分位 p25/中位/p75/p90）
+// 委託界線（v2.5-doc 改：委託＝「每日」計費等效 token；4 Gate 500萬/1000萬/3000萬/5000萬，不浮灌）
+const QUEST_FLOOR = 100000; // 委託下限：當日有效 token < 10 萬不算委託（連 D 都不給）
 const QUEST_TIERS = [
-  { tier: 'D', lo: 0,        hi: 170000 },
-  { tier: 'C', lo: 170000,   hi: 330000 },
-  { tier: 'B', lo: 330000,   hi: 760000 },
-  { tier: 'A', lo: 760000,   hi: 1800000 },
-  { tier: 'S', lo: 1800000,  hi: Infinity },
+  { tier: 'D', lo: 0,         hi: 5000000 },
+  { tier: 'C', lo: 5000000,   hi: 10000000 },
+  { tier: 'B', lo: 10000000,  hi: 30000000 },
+  { tier: 'A', lo: 30000000,  hi: 50000000 },
+  { tier: 'S', lo: 50000000,  hi: Infinity },
 ];
 const ELITE_WEIGHT = { D: 1, C: 2, B: 3, A: 5, S: 8 }; // 精英分權重
 function projectsRoot() { return path.join(os.homedir(), '.claude', 'projects'); }
@@ -58,7 +59,7 @@ const ELITE_RATIO = 1.2;      // 精英曲線比率（design §2.1 #017 定案 �
 const ELITE_UNLOCK_LV = 50;   // 精英解鎖：冒險者需達 LV50（design §2.1）
 const BOOK_CHARS = 100000;    // 10 萬字 = 1 本（design §4.3 #027）
 const BOOK_RATE = 0.7;        // 計費等效 × 0.7 字/token
-const FLOW_LABEL = { input: '你新送進', output: 'AI寫出', cacheCreation: '首次建快取', cacheRead: '重複讀歷史' }; // design §4.2
+const FLOW_LABEL = { input: '輸入', output: 'AI寫出', cacheCreation: '首次建快取', cacheRead: '重複讀歷史' }; // design §4.2
 
 // ---- v2.5 Plan3 四元素常數 ----
 const RARITY_RANK = { N: 1, R: 2, SR: 3, UR: 4, LR: 5 };
@@ -262,6 +263,13 @@ function progressFor(exp) {
   const into = exp - (lv - 1) * LEVEL_STEP;
   return { lv, into, step: LEVEL_STEP, toNext: LEVEL_STEP - into };
 }
+// 通用 1-based 進度（給投入軸 指揮/殺敵 用任意除數，與 progressFor 同形）
+function progressBy(value, step) {
+  const v = Math.max(0, value);
+  const lv = Math.floor(v / step) + 1;
+  const into = v - (lv - 1) * step;
+  return { lv, into, step, toNext: step - into };
+}
 
 // ---- 時間 ----
 function pad(n) { return String(n).padStart(2, '0'); }
@@ -391,8 +399,8 @@ function categorizeSkills(state) {
 // 一行式四等級面板（design §2.3）：左=會升級的榮譽（成果+投入），右=只增的代價
 function renderPanelLine(state, d) {
   const advLv = levelFor(state.global.exp);
-  const eliteLv = advLv >= ELITE_UNLOCK_LV ? eliteLevel(d.elitePoints) : 0;
-  let lvs = `[等級] 冒險者${advLv} 精英${eliteLv} 指揮${d.commandLevel} 殺敵${d.slayLevel}`;
+  // 精英等級暫不顯示（移為 feature，待後續設計）；eliteLevel()/精英分 仍計算保留供日後啟用
+  let lvs = `[等級] 冒險者${advLv} 指揮${d.commandLevel} 殺敵${d.slayLevel}`;
   if (d.streak) {                                              // v2.5 Plan3 連勤顯示
     const { current = 0, longest = 0 } = d.streak;
     lvs += ` 🔥${current}` + (longest > current ? `(PR${longest})` : '');
@@ -441,8 +449,16 @@ function renderStatus(state, derived = null, ach = null) {
   const title = ach ? deriveTitle(ach.unlocked, ach.titlePin) : null;
   let out = `# EXP 玩家面板（冒險者公會）\n\n`;
   if (derived) out += renderPanelLine(state, derived) + `\n\n`;
-  out += `冒險者　LV${g.lv}${title ? `〈${title}〉` : ''} (${g.into}/${g.step}) Total:${state.global.exp}\n\n`;
-  out += `地城（專案）\n`;
+  out += `冒險者　LV${g.lv}${title ? `〈${title}〉` : ''} (${g.into}/${g.step}) Total:${state.global.exp}\n`;
+  if (derived) {                                              // 投入軸詳列（與冒險者同款；指揮=對話、殺敵=純打字字元）
+    const conv = derived.conversations || 0;
+    const cmd = progressBy(conv, COMMAND_DIVISOR);
+    const slayRaw = Math.max(0, (derived.typedChars || 0) - (derived.codeChars || 0));
+    const sly = progressBy(slayRaw, SLAY_DIVISOR);
+    out += `指揮　　LV${cmd.lv} (${cmd.into}/${cmd.step}) Total:${conv} 次對話\n`;
+    out += `殺敵　　LV${sly.lv} (${fmtWan(sly.into)}/${fmtWan(sly.step)}) Total:${fmtWan(slayRaw)}（純打字）\n`;
+  }
+  out += `\n地城（專案）\n`;
   const dungeons = Object.entries(state.dungeons).sort((a, b) => b[1].exp - a[1].exp);
   if (!dungeons.length) out += `  （尚無）\n`;
   for (const [name, d] of dungeons) out += lvLine(`【${name}】`, d.exp);
@@ -662,9 +678,12 @@ const HELP = `ExpBook 指令（冒險者公會制；冒險者等級 + 地城(專
   調整 EXP 數值：編輯 ${path.join(resolveHome(), 'config.json')}  例 {"exp_of":{"task":150,"lesson":30}}（只影響之後新事件）
   預設 7 技能：${DEFAULT_SKILLS.join(' / ')}（可自由新增其他技能 tag）`;
 
-// ---- v2.5 衍生層：等級公式 ----
-function commandLevel(conversations) { return Math.floor(Math.sqrt(Math.max(0, conversations) / 4)); }
-function slayLevel(typedChars) { return Math.floor(Math.sqrt(Math.max(0, typedChars) / 600)); }
+// ---- v2.5 衍生層：等級公式（線性除數；不浮灌、等級該有深度）----
+const COMMAND_DIVISOR = 1000;    // 指揮：每 1000 次對話 1 級
+const SLAY_DIVISOR = 1000000;    // 殺敵：每 100 萬字（扣 code 純打字）1 級
+// 1-based（與冒險者 levelFor 一致）：預設 Lv1，每滿一個除數 +1 級
+function commandLevel(conversations) { return Math.floor(Math.max(0, conversations) / COMMAND_DIVISOR) + 1; }
+function slayLevel(typedChars) { return Math.floor(Math.max(0, typedChars) / SLAY_DIVISOR) + 1; }
 function _todayStr() { return now().slice(0, 10); }
 
 // 日曆週桶（7 天，Monday 對齊；epoch day0=Thu，+4 使 Monday 起算為整數邊界）
@@ -817,21 +836,13 @@ function classifyTier(billable) {
   for (const t of QUEST_TIERS) if (billable >= t.lo && billable < t.hi) return t;
   return QUEST_TIERS[QUEST_TIERS.length - 1];
 }
-// 把 transcript token 依 task event 時間區間歸成委託；回傳每筆 task 對應的委託
-function questsByTaskInterval(scan, log) {
-  const tasks = log.filter((e) => e.kind === 'task')
-    .map((e) => ({ ev: e, ms: Date.parse(e.ts) }))
-    .filter((x) => !Number.isNaN(x.ms))
-    .sort((a, b) => a.ms - b.ms);
-  if (!tasks.length) return [];
-  const quests = tasks.map((t) => ({ ts: t.ev.ts, reason: t.ev.reason, dungeon: t.ev.dungeon || null, billable: 0 }));
-  for (const m of scan.messages) {
-    let idx = -1;
-    for (let i = 0; i < tasks.length; i++) { if (m.ts <= tasks[i].ms) { idx = i; break; } }
-    if (idx >= 0) quests[idx].billable += m.billable;
-  }
-  for (const q of quests) q.tier = classifyTier(q.billable).tier;
-  return quests;
+// 委託＝「每日」計費等效 token（v2.5-doc 改）：scan.perDay 一天一張委託單，依 QUEST_TIERS 分級。
+// （原 questsByTaskInterval 改為 per-day；「一天一委託」語意更直觀、門檻錨真實單日量級。）
+function questsByDay(scan) {
+  return Object.entries(scan.perDay || {})
+    .filter(([, billable]) => billable >= QUEST_FLOOR)   // 下限：當日 < 10 萬不算委託
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([day, billable]) => ({ day, billable, tier: classifyTier(billable).tier }));
 }
 
 // 衍生指標主函式（log = readLog() 結果；本 Task 只填基礎欄，委託/等級在後續 Task 補在 return base 前）
@@ -848,7 +859,7 @@ function deriveMetrics(scan, log) {
     costUSD: costOf(scan.byModel),
     window: { from: scan.minTs, to: scan.maxTs, files: scan.fileCount, messages: scan.msgCount },
   };
-  const quests = questsByTaskInterval(scan, log);
+  const quests = questsByDay(scan);
   const tierCount = { D: 0, C: 0, B: 0, A: 0, S: 0 };
   let elitePoints = 0;
   for (const q of quests) { tierCount[q.tier]++; elitePoints += ELITE_WEIGHT[q.tier] || 0; }
@@ -1029,7 +1040,7 @@ function main(argv) {
 
 module.exports = {
   LEVEL_STEP, EXP_OF, KIND_LABEL, DEFAULT_DUNGEON, DEFAULT_SKILLS,
-  resolveHome, paths, levelFor, progressFor,
+  resolveHome, paths, levelFor, progressFor, progressBy,
   fmtTs, now, ensureBase, appendEvent, readLog, eventSkills,
   applyEvent, computeState, writeState, readState,
   parseSince, filterEvents, parseSkills,
@@ -1038,7 +1049,7 @@ module.exports = {
   historyLines, writeView, safeName,
   buildEvent, stagePending, readPending, flushPending, flushSummaryText, removeEvents,
   loadConfig, expDeltaOf,
-  scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByTaskInterval, deriveAchievements, readDerived, readAchievements, // v2.5 衍生層
+  scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByDay, deriveAchievements, readDerived, readAchievements, // v2.5 衍生層
   commandLevel, slayLevel, computeStreak, weekIndex, // v2.5 等級公式 + 連勤
   fmtYi, fmtWan, fmtUSD, eliteLevel, // v2.5 顯示層：數字格式 + 精英等級
   renderPanelLine, renderFuelDashboard, // v2.5 一行式四等級面板 + 燃料儀表板
