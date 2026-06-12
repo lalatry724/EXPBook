@@ -45,6 +45,7 @@ description: Agent 成長歷程系統（ExpBook，冒險者公會制）。用 ex
 | 口語（中英夾雜皆認） | 指令 |
 |----|----|
 | 檢視玩家面板 / show ExpBook status / 現在幾級 | `status` |
+| expbook show / 只看第一行 / 快速看等級 | `show`（重算後只印面板第一行，不產報告檔） |
 | ExpBook help / 有哪些指令 | `help` |
 | 看歷程 / 我最近做了什麼 | `history [篩選]` |
 | 這輪加了什麼 EXP / 剛剛為什麼加分 | `lastflush` |
@@ -52,7 +53,7 @@ description: Agent 成長歷程系統（ExpBook，冒險者公會制）。用 ex
 | 看 X 地城 / 這專案做過什麼 | `dungeon X` |
 | 看 X 技能 / 我這能力練多少 | `skill X` |
 
-除 `help`、`lastflush` 外，檢視指令都會產報告檔；AI 只轉述 stdout 那行指標。
+除 `help`、`lastflush`、`show` 外，檢視指令都會產報告檔；AI 只轉述 stdout 那行指標。（`show` 重算後只把面板第一行印到 stdout，不寫報告檔。）
 
 ## EXP 增減透明 + 可調整
 - **入帳當下可見**：`stage` 回顯 `✎ staged 心法 (+20 EXP)｜事由`；`flush` 印「本輪 EXP 入帳」明細（每筆 `+Δ [kind] (地城) {技能} 事由` + 總和）並寫入 `~/.claude/expbook/_last_flush.txt`（Claude）／`~/.gemini/expbook/_last_flush.txt`（gemini），隨腳本所在 CLI home。

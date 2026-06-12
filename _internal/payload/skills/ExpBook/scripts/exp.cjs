@@ -240,7 +240,7 @@ function pickEasterEgg(d, egg, prs, todayStr, rng = Math.random) {
 // ---- v2.5 顯示層：數字格式 ----
 function fmtYi(n, dp = 1) { return (Number(n || 0) / 1e8).toFixed(dp) + '億'; }      // token → 億（1 億=100M）
 function fmtWan(chars) { return (Number(chars || 0) / 10000).toFixed(1) + '萬字'; }  // 字元 → 萬字
-function fmtUSD(n) { return '$' + Math.round(Number(n || 0)).toLocaleString('en-US'); }
+function fmtUSD(n) { return 'US$' + Math.round(Number(n || 0)).toLocaleString('en-US'); }
 
 // 精英分 → 精英等級（v2.8 平線）：cost=ELITE_STEP/級，Lv = ⌊分/50⌋、預設 Lv0。
 function eliteLevel(points) {
@@ -450,10 +450,10 @@ function categorizeSkills(state) {
 
 // 一行式四等級面板（design §2.3）：左=會升級的榮譽（成果+投入），右=只增的代價
 function renderPanelLine(state, d) {
-  const advLv = levelFor(state.global.exp);
+  const g = progressFor(state.global.exp);                      // 冒險者等級 + 該級進度（當前/升級所需）
   // 精英＝隱藏等級（v2.8）：Lv1（≥50 精英分）才現身，列於冒險者後（成果組 ①②）
   const eLv = eliteLevel(d.elitePoints);
-  let lvs = `[等級] 冒險者${advLv}` + (eLv >= 1 ? ` 精英${eLv}` : '') + ` 指揮${d.commandLevel} 殺敵${d.slayLevel}`;
+  let lvs = `[等級] 冒險者${g.lv}(${g.into}/${g.step})` + (eLv >= 1 ? ` 精英${eLv}` : '') + ` 指揮${d.commandLevel} 殺敵${d.slayLevel}`;
   if (d.streak) {                                              // v2.5 Plan3 連勤顯示
     const { current = 0, longest = 0 } = d.streak;
     lvs += ` 🔥${current}` + (longest > current ? `(PR${longest})` : '');
@@ -719,6 +719,7 @@ const HELP = `ExpBook 指令（冒險者公會制；冒險者等級 + 地城(專
     fail    "<敗因>"        [--dungeon ..] [--skill ..]            敗戰 +1
     regress "<重犯的已知錯>" [--dungeon ..] [--skill ..]           常錯 +1
   檢視（產報告檔，只回指標）：
+    show                       重算一次 → 只印面板第一行（等級＋消耗，不產報告檔）
     status                     → STATUS.md
     history [--dungeon|--skill|--kind|--since|--limit]  → views/history.md
     dungeon <地城>             → views/dungeon-<地城>.md
@@ -1000,6 +1001,15 @@ function main(argv) {
       const d = readDerived(p);
       const tail = d ? `｜指揮Lv${d.commandLevel} 殺敵Lv${d.slayLevel}` : '';
       console.log(`→ STATUS.md（冒險者 Lv${levelFor(s.global.exp)} EXP ${s.global.exp}${tail}）`);
+      break;
+    }
+    case 'show': {                                              // 重算一次 → 只印面板第一行
+      const p = paths();
+      try { deriveAchievements(p); } catch (e) { console.error(`（derive 略過：${e.message}）`); }
+      const s = persist(p);
+      const d = readDerived(p);
+      if (d) console.log(renderPanelLine(s, d));
+      else console.log(`冒險者 Lv${levelFor(s.global.exp)} EXP ${s.global.exp}（derived 缺，無法產面板行）`);
       break;
     }
     case 'history': {
