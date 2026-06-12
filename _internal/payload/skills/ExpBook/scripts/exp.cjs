@@ -964,7 +964,7 @@ function deriveAchievements(p = paths(), opts = {}) {
   const records = mergeRecords(prevRecords, derived);
   const prs = recordPRs(prevRecords, records);
   const payload = {
-    version: 'v2.6', scanned_at: now(),
+    version: 'v2.8', scanned_at: now(),
     last_scanned_ts: scan.maxTs != null ? new Date(scan.maxTs).toISOString() : null,
     derived, unlocked, records, egg: prev.egg || {},
   };
