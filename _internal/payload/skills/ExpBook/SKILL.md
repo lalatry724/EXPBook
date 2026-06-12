@@ -7,6 +7,7 @@ description: Agent 成長歷程系統（ExpBook，冒險者公會制）。用 ex
 
 腳本：`scripts/exp.cjs`（純 Node，零依賴）。資料在所屬 CLI home 的 `expbook/` 下（由 `exp.cjs:resolveHome()` 從 `__dirname` 推導：Claude→`~/.claude/expbook/`、gemini→`~/.gemini/expbook/`；可用 `EXPBOOK_HOME` 覆寫）。完整規格：`doc/SPEC.md`。
 （命名：**ExpBook = 系統名**；**EXP = 經驗值單位**。對話一律稱 ExpBook。）
+> 人讀完整使用手冊（推廣／上手指南）→ `GUIDE.md`；執行期權威規格 → `doc/SPEC.md`。本檔只留 AI 每輪操作所需。
 
 ## 最高原則：厚程式、薄 AI
 所有計算/渲染由 exp.cjs 完成。AI 每輪只做：辨識意圖 → 發一條短指令 → 轉述一行指標。**禁止把報告檔內容讀進對話**；檢視結果一律請使用者自行開檔。
