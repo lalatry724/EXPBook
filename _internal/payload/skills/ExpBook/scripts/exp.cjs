@@ -43,7 +43,7 @@ const QUEST_TIERS = [
   { tier: 'A', lo: 30000000,  hi: 50000000 },
   { tier: 'S', lo: 50000000,  hi: Infinity },
 ];
-const ELITE_WEIGHT = { D: 1, C: 2, B: 3, A: 5, S: 8 }; // 精英分權重
+const ELITE_WEIGHT = { D: 1, C: 2, B: 3, A: 5, S: 25 }; // 精英分權重（v2.8：S 8→25，高價值主貨幣）
 function projectsRoot() { return path.join(os.homedir(), '.claude', 'projects'); }
 const ACTIVE_GAP_MS = 15 * 60000;           // 使用時間：相鄰訊息 gap<15 分才累加
 // 定價（每百萬 token，2026-06；查 claude-api skill 為準，變動只重算展示欄、不影響等級）
@@ -54,9 +54,8 @@ const PRICING = {
 };
 
 // ---- v2.5 顯示層常數 ----
-const ELITE_BASE = 500;       // 精英 cost(1)
-const ELITE_RATIO = 1.2;      // 精英曲線比率（design §2.1 #017 定案 ×1.2）
-const ELITE_UNLOCK_LV = 50;   // 精英解鎖：冒險者需達 LV50（design §2.1）
+const ELITE_STEP = 50;        // 精英每級門檻（v2.8 平線：cost=50/級，Lv_n 累計門檻=50n）
+const ELITE_GATE = { D: 20, C: 50, B: 100 }; // 精英化逐階退役 Gate：達該精英級後，該階委託停止記分（愈精英愈只認高價值）
 const BOOK_CHARS = 100000;    // 10 萬字 = 1 本（design §4.3 #027）
 const BOOK_RATE = 0.7;        // 計費等效 × 0.7 字/token
 const FLOW_LABEL = { input: '輸入', output: 'AI寫出', cacheCreation: '首次建快取', cacheRead: '重複讀歷史' }; // design §4.2
@@ -243,17 +242,24 @@ function fmtYi(n, dp = 1) { return (Number(n || 0) / 1e8).toFixed(dp) + '億'; }
 function fmtWan(chars) { return (Number(chars || 0) / 10000).toFixed(1) + '萬字'; }  // 字元 → 萬字
 function fmtUSD(n) { return '$' + Math.round(Number(n || 0)).toLocaleString('en-US'); }
 
-// 精英分 → 精英等級：cost(n)=round(ELITE_BASE×ELITE_RATIO^(n-1))，累計達標升級（無硬上限）
+// 精英分 → 精英等級（v2.8 平線）：cost=ELITE_STEP/級，Lv = ⌊分/50⌋、預設 Lv0。
 function eliteLevel(points) {
-  let p = Number(points || 0);
-  if (p <= 0) return 0;
-  let lv = 0, acc = 0;
-  while (lv < 100000) {                                   // 防爆上限
-    const next = Math.round(ELITE_BASE * Math.pow(ELITE_RATIO, lv)); // 升到 lv+1 的門檻
-    if (acc + next > p) break;
-    acc += next; lv++;
+  const p = Number(points || 0);
+  return p > 0 ? Math.floor(p / ELITE_STEP) : 0;
+}
+// 精英分（v2.8）：按「日序」逐筆 fold 加權委託分，套用逐階退役 Gate。
+// 必須時序累計而非總分布×權重——因 Gate 後段令低階失效，當日得分取決於「入帳前已達第幾精英級」。
+// quests 須已按日序（questsByDay 內已 sort）。只進不退：被 Gate 的日加 0、永不扣分；
+// 過往日的貢獻由其時序位置固定（加未來日不改變過去判級）→ elitePoints 對真實時間單調不減、rebuild 可重現。
+function eliteScore(quests) {
+  let points = 0;
+  for (const q of quests || []) {
+    const lv = eliteLevel(points);                        // 入帳前的當前精英級
+    const gate = ELITE_GATE[q.tier];                      // 該階的退役門檻（A/S 無 gate）
+    if (gate != null && lv >= gate) continue;             // 已退役 → 本日 +0
+    points += ELITE_WEIGHT[q.tier] || 0;
   }
-  return lv;
+  return points;
 }
 
 // ---- 路徑 ----
@@ -445,8 +451,9 @@ function categorizeSkills(state) {
 // 一行式四等級面板（design §2.3）：左=會升級的榮譽（成果+投入），右=只增的代價
 function renderPanelLine(state, d) {
   const advLv = levelFor(state.global.exp);
-  // 精英等級暫不顯示（移為 feature，待後續設計）；eliteLevel()/精英分 仍計算保留供日後啟用
-  let lvs = `[等級] 冒險者${advLv} 指揮${d.commandLevel} 殺敵${d.slayLevel}`;
+  // 精英＝隱藏等級（v2.8）：Lv1（≥50 精英分）才現身，列於冒險者後（成果組 ①②）
+  const eLv = eliteLevel(d.elitePoints);
+  let lvs = `[等級] 冒險者${advLv}` + (eLv >= 1 ? ` 精英${eLv}` : '') + ` 指揮${d.commandLevel} 殺敵${d.slayLevel}`;
   if (d.streak) {                                              // v2.5 Plan3 連勤顯示
     const { current = 0, longest = 0 } = d.streak;
     lvs += ` 🔥${current}` + (longest > current ? `(PR${longest})` : '');
@@ -496,7 +503,10 @@ function renderStatus(state, derived = null, ach = null) {
   let out = `# EXP 玩家面板（冒險者公會）\n\n`;
   if (derived) out += renderPanelLine(state, derived) + `\n\n`;
   out += `冒險者　LV${g.lv}${title ? `〈${title}〉` : ''} (${g.into}/${g.step}) Total:${state.global.exp}\n`;
-  if (derived) {                                              // 投入軸詳列（與冒險者同款；指揮=對話、殺敵=純打字字元）
+  if (derived) {                                              // 成果軸②＋投入軸③④詳列（與冒險者同款）
+    const ePts = derived.elitePoints || 0;
+    const eLv = eliteLevel(ePts);
+    if (eLv >= 1) out += `精英　　LV${eLv} (${ePts % ELITE_STEP}/${ELITE_STEP}) Total:${ePts} 分（高價值委託加權）\n`;
     const conv = derived.conversations || 0;
     const cmd = progressBy(conv, COMMAND_DIVISOR);
     const slayRaw = Math.max(0, (derived.typedChars || 0) - (derived.codeChars || 0));
@@ -905,13 +915,12 @@ function deriveMetrics(scan, log) {
     costUSD: costOf(scan.byModel),
     window: { from: scan.minTs, to: scan.maxTs, files: scan.fileCount, messages: scan.msgCount },
   };
-  const quests = questsByDay(scan);
+  const quests = questsByDay(scan);                       // 已按日序
   const tierCount = { D: 0, C: 0, B: 0, A: 0, S: 0 };
-  let elitePoints = 0;
-  for (const q of quests) { tierCount[q.tier]++; elitePoints += ELITE_WEIGHT[q.tier] || 0; }
+  for (const q of quests) tierCount[q.tier]++;            // 生涯計數：Gate 不抹去「該日發生過」
   base.quests = quests;
   base.tierCount = tierCount;
-  base.elitePoints = elitePoints;
+  base.elitePoints = eliteScore(quests);                  // v2.8：時序 fold + 逐階退役 Gate
   base.commandLevel = commandLevel(base.conversations);
   base.slayLevel = slayLevel(Math.max(0, base.typedChars - base.codeChars));
   base.streak = computeStreak(log, _todayStr());
@@ -1100,7 +1109,7 @@ module.exports = {
   loadConfig, expDeltaOf,
   scanTranscripts, activeHours, costOf, deriveMetrics, classifyTier, questsByDay, deriveAchievements, readDerived, readAchievements, // v2.5 衍生層
   commandLevel, slayLevel, computeStreak, weekIndex, // v2.5 等級公式 + 連勤
-  fmtYi, fmtWan, fmtUSD, eliteLevel, // v2.5 顯示層：數字格式 + 精英等級
+  fmtYi, fmtWan, fmtUSD, eliteLevel, eliteScore, ELITE_STEP, ELITE_WEIGHT, ELITE_GATE, // v2.5 顯示層：數字格式 + 精英等級（v2.8 平線+Gate）
   renderPanelLine, renderFuelDashboard, // v2.5 一行式四等級面板 + 燃料儀表板
   RARITY_RANK, ACHIEVEMENTS, badgeById, buildBadgeContext, evalBadges, // v2.5 Plan3 徽章
   deriveTitle, mergeRecords, recordPRs, pickEasterEgg, RARE_LINES,
