@@ -1,0 +1,36 @@
+# Python 快取
+__pycache__/
+*.pyc
+
+# 備份 / log
+*.bak
+*.log
+
+# Node
+node_modules/
+
+# 工具在 root 產生的「本機私人」輸出，不打包進 PikaTool
+devlog.md
+.gemini/
+userChatLog.md
+userChatLog_*.md
+userChatLog_error.log
+session-handoff.md
+model_lock_handoff.md
+user-work-flow-*.md
+
+# 輸出目錄（保留資料夾，忽略內容）
+_internal/output/*
+!_internal/output/.gitkeep
+
+# Claude Code 本機設定/記憶（個人狀態，整個不打包）
+.claude/
+_internal/archive/
+_portable/
+.claude/memory/personal/
+
+# 流程暫存區（規劃/TODO/devlog/retrospective 草稿/封存 next-phase，不打包）
+_staging/
+
+# ExpBook derive 衍生資料（可 rebuild、非 source）
+_internal/payload/expbook/

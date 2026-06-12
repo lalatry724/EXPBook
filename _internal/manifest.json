@@ -1,0 +1,64 @@
+{
+  "version": "1.0.0",
+  "tools": [
+    {
+      "id": "expbook",
+      "degraded_without_atoms": false,
+      "files": [
+        {
+          "src": "payload/skills/ExpBook/SKILL.md",
+          "dst": "skills/ExpBook/SKILL.md"
+        },
+        {
+          "src": "payload/skills/ExpBook/GUIDE.md",
+          "dst": "skills/ExpBook/GUIDE.md"
+        },
+        {
+          "src": "payload/skills/ExpBook/scripts/exp.cjs",
+          "dst": "skills/ExpBook/scripts/exp.cjs"
+        },
+        {
+          "src": "payload/hooks/expbook-prompt.cjs",
+          "dst": "hooks/expbook-prompt.cjs"
+        },
+        {
+          "src": "payload/hooks/expbook-stop.cjs",
+          "dst": "hooks/expbook-stop.cjs"
+        }
+      ],
+      "dirs": [
+        "expbook"
+      ],
+      "hooks": [
+        {
+          "event": "UserPromptSubmit",
+          "settings_file": "settings.json",
+          "match": "expbook-prompt.cjs",
+          "group": {
+            "hooks": [
+              {
+                "type": "command",
+                "command": "node \"{CLAUDE_HOME}/hooks/expbook-prompt.cjs\"",
+                "timeout": 5
+              }
+            ]
+          }
+        },
+        {
+          "event": "Stop",
+          "settings_file": "settings.json",
+          "match": "expbook-stop.cjs",
+          "group": {
+            "hooks": [
+              {
+                "type": "command",
+                "command": "node \"{CLAUDE_HOME}/hooks/expbook-stop.cjs\"",
+                "timeout": 10
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
