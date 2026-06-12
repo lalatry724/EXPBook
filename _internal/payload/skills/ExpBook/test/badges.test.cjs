@@ -15,11 +15,62 @@ function D(over = {}) {
 }
 const ST = { global: { exp: 0 }, dungeons: {}, skills: {} };
 
-test('ACHIEVEMENTS 共 25 枚、id 不重複、稀有度合法', () => {
-  assert.strictEqual(exp.ACHIEVEMENTS.length, 25);
+test('ACHIEVEMENTS 共 47 枚、id 不重複、稀有度合法', () => {
+  assert.strictEqual(exp.ACHIEVEMENTS.length, 47);
   const ids = new Set(exp.ACHIEVEMENTS.map((b) => b.id));
-  assert.strictEqual(ids.size, 25);
+  assert.strictEqual(ids.size, 47);
   for (const b of exp.ACHIEVEMENTS) assert.ok(exp.RARITY_RANK[b.rarity], `bad rarity ${b.rarity}`);
+});
+
+test('v2.7 supersede：舊 level 門檻徽章 id 已退役、不存在', () => {
+  const ids = new Set(exp.ACHIEVEMENTS.map((b) => b.id));
+  for (const dead of ['cmd_10', 'cmd_50', 'slay_25', 'slay_50']) assert.ok(!ids.has(dead), `${dead} 應已退役`);
+});
+
+test('B 投入改錨 raw：對話/純打字里程碑（不再讀 commandLevel/slayLevel）', () => {
+  // 對話 raw 階梯
+  const c1 = exp.buildBadgeContext(ST, [], D({ conversations: 5000 }));
+  let got = exp.evalBadges(c1);
+  assert.ok(got.includes('talk_1k'));
+  assert.ok(got.includes('talk_5k'));
+  assert.ok(!got.includes('talk_20k'));
+  // 純打字 = typedChars - codeChars
+  const c2 = exp.buildBadgeContext(ST, [], D({ typedChars: 6e6, codeChars: 1e6 })); // 純 500 萬
+  got = exp.evalBadges(c2);
+  assert.ok(got.includes('type_1m'));
+  assert.ok(got.includes('type_5m'));
+  assert.ok(!got.includes('type_20m'));
+  // 高 commandLevel/slayLevel 不該再解鎖任何 B 投入徽章（已脫鉤）
+  const c3 = exp.buildBadgeContext(ST, [], D({ commandLevel: 99, slayLevel: 99 }));
+  const b = exp.evalBadges(c3).filter((id) => /^(talk_|type_)/.test(id));
+  assert.deepStrictEqual(b, []);
+});
+
+test('G 技藝：技能/地城/心法廣度（由 log 去重）', () => {
+  const log = [
+    { ts: '2026-06-01 10:00:00', kind: 'lesson', skills: ['除錯', '架構'], dungeon: 'A', reason: 'x' },
+    { ts: '2026-06-02 10:00:00', kind: 'lesson', skills: ['實作', '重構', '研究'], dungeon: 'B', reason: 'x' },
+  ];
+  const got = exp.evalBadges(exp.buildBadgeContext(ST, log, D()));
+  assert.ok(got.includes('jack_of_trades')); // 5 種技能
+  assert.ok(!got.includes('polymath'));
+  assert.ok(!got.includes('dungeon_explorer')); // 僅 2 地城
+  assert.ok(!got.includes('scholar')); // 僅 2 心法
+});
+
+test('H 里程：藏書/總處理量/活躍天數', () => {
+  const got = exp.evalBadges(exp.buildBadgeContext(ST, [], D({ billable: 2e8, totalProcessed: 1.2e10 })));
+  assert.ok(got.includes('library_1k'));   // 2億×0.7÷10萬 = 1400 本
+  assert.ok(!got.includes('library_5k'));
+  assert.ok(got.includes('data_flood'));    // 120 億 ≥ 100 億
+  assert.ok(got.includes('mage_yi'));
+});
+
+test('D 新增：token_10yi(10億) / burn_10k($10000)', () => {
+  const got = exp.evalBadges(exp.buildBadgeContext(ST, [], D({ billable: 1.1e9, costUSD: 10500 })));
+  assert.ok(got.includes('token_10yi'));
+  assert.ok(got.includes('burn_10k'));
+  assert.ok(got.includes('burn_5k'));
 });
 
 test('A 戰績：task 門檻 1/100/1000/10000', () => {
@@ -30,12 +81,21 @@ test('A 戰績：task 門檻 1/100/1000/10000', () => {
   assert.ok(!got.includes('master_1000'));
 });
 
-test('C 委託：全階通吃需 D~S 各≥1；巨龍需單委託 > 1e7', () => {
-  const ctx = exp.buildBadgeContext(ST, [], D({ tierCount: { D: 1, C: 1, B: 1, A: 1, S: 1 }, maxQuestBillable: 2e7 }));
+test('C 委託：全階通吃需 D~S 各≥1；巨龍 re-anchor 單日 > 3e7', () => {
+  const ctx = exp.buildBadgeContext(ST, [], D({ tierCount: { D: 1, C: 1, B: 1, A: 1, S: 1 }, maxQuestBillable: 4e7 }));
   const got = exp.evalBadges(ctx);
   assert.ok(got.includes('all_tiers'));
   assert.ok(got.includes('first_s'));
   assert.ok(got.includes('dragon_slayer'));
+  // 2000 萬（舊門檻可達）在新門檻下不解鎖
+  assert.ok(!exp.evalBadges(exp.buildBadgeContext(ST, [], D({ maxQuestBillable: 2e7 }))).includes('dragon_slayer'));
+});
+
+test('C 委託：委託日/精銳獵人門檻', () => {
+  const got = exp.evalBadges(exp.buildBadgeContext(ST, [], D({ tierCount: { D: 10, C: 7, B: 8, A: 5, S: 0 } })));
+  assert.ok(got.includes('quest_30'));   // 30 委託日
+  assert.ok(!got.includes('quest_100'));
+  assert.ok(got.includes('a_hunter_5')); // A≥5
 });
 
 test('D 代價：成本門檻 + 隱藏 $3000', () => {
@@ -75,14 +135,14 @@ test('F 幽默：浴火重生(連3敗後task)／惜字如金(<10字)／手滑(re
 });
 
 test('deriveTitle：最高稀有度優先，同稀用最新 ts；pin 覆寫', () => {
-  const unlocked = { first_task: '2026-06-01 10:00:00', slay_25: '2026-06-02 10:00:00', cmd_50: '2026-06-03 10:00:00' };
-  assert.strictEqual(exp.deriveTitle(unlocked, null), '沙場宿將');
+  const unlocked = { first_task: '2026-06-01 10:00:00', type_5m: '2026-06-02 10:00:00', talk_20k: '2026-06-03 10:00:00' };
+  assert.strictEqual(exp.deriveTitle(unlocked, null), '沙場宿將'); // talk_20k SR 最高
   assert.strictEqual(exp.deriveTitle(unlocked, '自訂頭銜'), '自訂頭銜');
   assert.strictEqual(exp.deriveTitle({}, null), null);
 });
 
 test('deriveTitle：同稀有度取最新解鎖', () => {
-  const unlocked = { slay_25: '2026-06-01 10:00:00', night_mage: '2026-06-05 10:00:00' };
+  const unlocked = { type_5m: '2026-06-01 10:00:00', night_mage: '2026-06-05 10:00:00' }; // 皆 R
   assert.strictEqual(exp.deriveTitle(unlocked, null), '夜術士');
 });
 
@@ -136,6 +196,24 @@ test('deriveAchievements 合併：unlocked 只進不退、records 取 max、回�
   } finally { fx.rm(home); fx.rm(root); }
 });
 
+test('deriveAchievements：prune 退役孤兒 id（無 ACHIEVEMENTS 定義者移除）', () => {
+  const home = fx.tmpHome();
+  const root = fx.tmpProjects([{ proj: 'p', file: 's.jsonl', lines: [
+    fx.asstMsg('2026-06-01T10:00:00.000Z', 'claude-opus-4-8', { in: 1000, out: 2000, cc: 0, cr: 0 }),
+    fx.userMsg('2026-06-01T10:01:00.000Z', 'hello'),
+  ] }]);
+  try {
+    const p = exp.paths(home);
+    // 預埋一個退役 id + 一個合法 id
+    fs.writeFileSync(p.achievementsFile, JSON.stringify({ unlocked: { slay_25: '2026-06-01 09:00:00', first_task: '2026-06-01 09:00:00' }, records: {} }));
+    const log = [{ ts: '2026-06-01 10:00:00', kind: 'task', reason: '完成首個有意義的委託' }];
+    exp.deriveAchievements(p, { projectsRoot: root, log });
+    const j = JSON.parse(fs.readFileSync(p.achievementsFile, 'utf8'));
+    assert.ok(!('slay_25' in j.unlocked), '退役 id 應被 prune');
+    assert.ok(j.unlocked.first_task, '合法 id 應保留');
+  } finally { fx.rm(home); fx.rm(root); }
+});
+
 test('pickEasterEgg 優先序：連擊 > 里程碑 > 暴擊 > 寶箱 > 稀有', () => {
   const rngNo = () => 0.99;
   let egg = {};
@@ -166,7 +244,7 @@ test('renderStatus 疊稱號/徽章/PR；無 ach 維持 Plan2 輸出', () => {
   const derived = { elitePoints: 0, commandLevel: 22, slayLevel: 51, totalProcessed: 5e9, billable: 2e8, costUSD: 3990,
     tierCount: { D: 1, C: 0, B: 0, A: 0, S: 0 }, flows: { input: 1, output: 1, cacheCreation: 1, cacheRead: 1 },
     conversations: 2129, typedChars: 2082000, codePct: 0.28, activeHours: 116.6, streak: { current: 3, longest: 9 } };
-  const ach = { unlocked: { cmd_50: '2026-06-03 10:00:00', first_task: '2026-06-01 10:00:00', burn_3k_secret: '2026-06-05 10:00:00' },
+  const ach = { unlocked: { talk_20k: '2026-06-03 10:00:00', first_task: '2026-06-01 10:00:00', burn_3k_secret: '2026-06-05 10:00:00' },
     records: { maxDayToken: 1.75e7, maxDayChars: 8000, maxQuest: 1.7e7, longestStreak: 9 }, titlePin: null };
   const out = exp.renderStatus(st, derived, ach);
   assert.match(out, /冒險者　LV18〈沙場宿將〉/);

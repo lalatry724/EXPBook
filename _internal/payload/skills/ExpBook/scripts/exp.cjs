@@ -63,7 +63,8 @@ const FLOW_LABEL = { input: '輸入', output: 'AI寫出', cacheCreation: '首次
 
 // ---- v2.5 Plan3 四元素常數 ----
 const RARITY_RANK = { N: 1, R: 2, SR: 3, UR: 4, LR: 5 };
-const DRAGON_TOKEN = 1e7;
+const DRAGON_TOKEN = 3e7;       // v2.7 re-anchor：單日委託 > 3000 萬 token（原 1000 萬 per-day 下天天觸發、失稀有性）
+const BOOK_EQUIV = (billable) => Math.floor((billable || 0) * BOOK_RATE / BOOK_CHARS); // 等效藏書（計費等效×0.7字÷10萬字）
 const REGRESS_BADGE_MIN = 3;
 const TERSE_MAX_CHARS = 10;
 const TALKATIVE_MIN = 50;
@@ -80,38 +81,65 @@ const RARE_LINES = [
 ];
 
 // ---- v2.5 Plan3 徽章表（宣告式，比照 SKILL_GROUPS；cond 純比較）----
+// v2.7 大擴充：25→47 枚、8 類。B 投入改錨「對話/打字 raw 里程碑」（原 level 門檻在大除數下永久鎖死，已 supersede）。
+// 全部純衍生·零 EXP·cond 只讀既有 ctx 指標 → 不新增可刷分管道。高階門檻一律錨在 live 真實值之上做梯度、不灌水。
 const ACHIEVEMENTS = [
-  // A 戰績
-  { id: 'first_task',   name: '初試啼聲', rarity: 'N',  cat: 'A 戰績', desc: '完成首個任務',        cond: (c) => c.taskCount >= 1 },
-  { id: 'veteran_100',  name: '百戰之身', rarity: 'R',  cat: 'A 戰績', desc: '累積 100 個任務',      cond: (c) => c.taskCount >= 100 },
-  { id: 'master_1000',  name: '千錘百鍊', rarity: 'SR', cat: 'A 戰績', desc: '累積 1000 個任務',     cond: (c) => c.taskCount >= 1000 },
-  { id: 'legend_10000', name: '萬卷功成', rarity: 'LR', cat: 'A 戰績', desc: '累積 10000 個任務',    cond: (c) => c.taskCount >= 10000 },
-  // B 投入
-  { id: 'cmd_10',  name: '見習指揮官', rarity: 'N',  cat: 'B 投入', desc: '指揮等級達 10', cond: (c) => c.commandLevel >= 10 },
-  { id: 'cmd_50',  name: '沙場宿將',   rarity: 'SR', cat: 'B 投入', desc: '指揮等級達 50', cond: (c) => c.commandLevel >= 50 },
-  { id: 'slay_25', name: '筆鋒如刃',   rarity: 'R',  cat: 'B 投入', desc: '殺敵等級達 25', cond: (c) => c.slayLevel >= 25 },
-  { id: 'slay_50', name: '一字千軍',   rarity: 'SR', cat: 'B 投入', desc: '殺敵等級達 50', cond: (c) => c.slayLevel >= 50 },
+  // A 戰績（任務量）
+  { id: 'first_task',    name: '初試啼聲', rarity: 'N',  cat: 'A 戰績', desc: '完成首個任務',     cond: (c) => c.taskCount >= 1 },
+  { id: 'veteran_100',   name: '百戰之身', rarity: 'R',  cat: 'A 戰績', desc: '累積 100 個任務',   cond: (c) => c.taskCount >= 100 },
+  { id: 'centurion_500', name: '身經百戰', rarity: 'R',  cat: 'A 戰績', desc: '累積 500 個任務',   cond: (c) => c.taskCount >= 500 },
+  { id: 'master_1000',   name: '千錘百鍊', rarity: 'SR', cat: 'A 戰績', desc: '累積 1000 個任務',  cond: (c) => c.taskCount >= 1000 },
+  { id: 'legend_10000',  name: '萬卷功成', rarity: 'LR', cat: 'A 戰績', desc: '累積 10000 個任務', cond: (c) => c.taskCount >= 10000 },
+  // B 投入（對話 raw 里程碑；原 cmd_10/cmd_50 supersede）
+  { id: 'talk_1k',  name: '見習指揮官', rarity: 'N',  cat: 'B 投入', desc: '累積 1,000 次對話',  cond: (c) => c.conversations >= 1000 },
+  { id: 'talk_5k',  name: '健談老兵',   rarity: 'R',  cat: 'B 投入', desc: '累積 5,000 次對話',  cond: (c) => c.conversations >= 5000 },
+  { id: 'talk_20k', name: '沙場宿將',   rarity: 'SR', cat: 'B 投入', desc: '累積 20,000 次對話', cond: (c) => c.conversations >= 20000 },
+  { id: 'talk_50k', name: '言出法隨',   rarity: 'UR', cat: 'B 投入', desc: '累積 50,000 次對話', cond: (c) => c.conversations >= 50000 },
+  // B 投入（純打字字數 raw 里程碑；原 slay_25/slay_50 supersede）
+  { id: 'type_1m',  name: '筆耕不輟', rarity: 'N',  cat: 'B 投入', desc: '純打字累積 100 萬字',   cond: (c) => c.pureTyped >= 1e6 },
+  { id: 'type_5m',  name: '筆鋒如刃', rarity: 'R',  cat: 'B 投入', desc: '純打字累積 500 萬字',   cond: (c) => c.pureTyped >= 5e6 },
+  { id: 'type_20m', name: '著作等身', rarity: 'SR', cat: 'B 投入', desc: '純打字累積 2,000 萬字', cond: (c) => c.pureTyped >= 2e7 },
+  { id: 'type_50m', name: '一字千軍', rarity: 'UR', cat: 'B 投入', desc: '純打字累積 5,000 萬字', cond: (c) => c.pureTyped >= 5e7 },
   // C 委託
-  { id: 'first_s',       name: '首級',       rarity: 'N',  cat: 'C 委託', desc: '完成首個 S 級委託',      cond: (c) => c.tiers.S >= 1 },
-  { id: 'all_tiers',     name: '全階通吃',   rarity: 'R',  cat: 'C 委託', desc: 'D~S 各至少 1 件',         cond: (c) => c.tiers.D >= 1 && c.tiers.C >= 1 && c.tiers.B >= 1 && c.tiers.A >= 1 && c.tiers.S >= 1 },
-  { id: 's_hunter_10',   name: 'S級獵人',    rarity: 'SR', cat: 'C 委託', desc: '累積 10 個 S 級委託',     cond: (c) => c.tiers.S >= 10 },
-  { id: 'dragon_slayer', name: '巨龍討伐者', rarity: 'UR', cat: 'C 委託', desc: '單委託 > 1000 萬 token',  cond: (c) => c.maxQuest > DRAGON_TOKEN },
+  { id: 'first_s',       name: '首級',       rarity: 'N',  cat: 'C 委託', desc: '完成首個 S 級委託',         cond: (c) => c.tiers.S >= 1 },
+  { id: 'all_tiers',     name: '全階通吃',   rarity: 'R',  cat: 'C 委託', desc: 'D~S 各至少 1 件',            cond: (c) => c.tiers.D >= 1 && c.tiers.C >= 1 && c.tiers.B >= 1 && c.tiers.A >= 1 && c.tiers.S >= 1 },
+  { id: 'quest_30',      name: '委託熟手',   rarity: 'R',  cat: 'C 委託', desc: '累積 30 個委託日',          cond: (c) => c.questDays >= 30 },
+  { id: 'quest_100',     name: '公會柱石',   rarity: 'SR', cat: 'C 委託', desc: '累積 100 個委託日',         cond: (c) => c.questDays >= 100 },
+  { id: 'a_hunter_5',    name: '精銳獵人',   rarity: 'SR', cat: 'C 委託', desc: '累積 5 個 A 級委託',        cond: (c) => c.tiers.A >= 5 },
+  { id: 's_hunter_10',   name: 'S級獵人',    rarity: 'SR', cat: 'C 委託', desc: '累積 10 個 S 級委託',       cond: (c) => c.tiers.S >= 10 },
+  { id: 'dragon_slayer', name: '巨龍討伐者', rarity: 'UR', cat: 'C 委託', desc: '單日委託 > 3000 萬 token',  cond: (c) => c.maxQuest > DRAGON_TOKEN },
   // D 代價（負面自嘲）
-  { id: 'mage_yi',         name: '億級法師',           rarity: 'R',  cat: 'D 代價', desc: '有效 token 破 1 億',        cond: (c) => c.billable >= 1e8 },
-  { id: 'burn_1k',         name: '燒錢如焚',           rarity: 'SR', cat: 'D 代價', desc: '等效成本破 $1000',          cond: (c) => c.costUSD >= 1000 },
-  { id: 'burn_5k',         name: '揮金如土',           rarity: 'UR', cat: 'D 代價', desc: '等效成本破 $5000',          cond: (c) => c.costUSD >= 5000 },
-  { id: 'burn_3k_secret',  name: '你知道燒了多少嗎',   rarity: 'SR', cat: 'D 代價', desc: '等效成本破 $3000（隱藏）',  hidden: true, cond: (c) => c.costUSD >= 3000 },
-  // E 習慣
-  { id: 'night_mage',      name: '夜術士',       rarity: 'R',  cat: 'E 習慣', desc: '0–5 點完成任務',   cond: (c) => c.night },
-  { id: 'morning_adv',     name: '晨型冒險者',   rarity: 'R',  cat: 'E 習慣', desc: '5–8 點完成任務',   cond: (c) => c.morning },
-  { id: 'weekend_warrior', name: '假日狂戰士',   rarity: 'R',  cat: 'E 習慣', desc: '週末完成任務',     cond: (c) => c.weekend },
-  { id: 'sleepless',       name: '不眠騎士',     rarity: 'SR', cat: 'E 習慣', desc: '單日使用 > 12 小時', cond: (c) => c.maxDayActiveHours > SLEEPLESS_HR },
-  { id: 'marathon',        name: '馬拉松',       rarity: 'SR', cat: 'E 習慣', desc: '單 session > 6 小時', cond: (c) => c.maxSessionHours > MARATHON_HR },
-  // F 隱藏/幽默
-  { id: 'phoenix',      name: '浴火重生',     rarity: 'R', cat: 'F 幽默', desc: '連 3 敗後達成任務', cond: (c) => c.phoenix },
-  { id: 'terse',        name: '惜字如金',     rarity: 'N', cat: 'F 幽默', desc: '< 10 字完成任務',   cond: (c) => c.terse },
-  { id: 'talkative',    name: '話癆',         rarity: 'N', cat: 'F 幽默', desc: '單日 > 50 次對話',   cond: (c) => c.maxDayConv > TALKATIVE_MIN },
-  { id: 'butterfinger', name: '手滑藝術家',   rarity: 'N', cat: 'F 幽默', desc: '常錯累積 3 次',     cond: (c) => c.regressCount >= REGRESS_BADGE_MIN },
+  { id: 'mage_yi',        name: '億級法師',         rarity: 'R',  cat: 'D 代價', desc: '有效 token 破 1 億',        cond: (c) => c.billable >= 1e8 },
+  { id: 'token_10yi',     name: '吞噬者',           rarity: 'SR', cat: 'D 代價', desc: '有效 token 破 10 億',       cond: (c) => c.billable >= 1e9 },
+  { id: 'burn_1k',        name: '燒錢如焚',         rarity: 'SR', cat: 'D 代價', desc: '等效成本破 $1000',          cond: (c) => c.costUSD >= 1000 },
+  { id: 'burn_3k_secret', name: '你知道燒了多少嗎', rarity: 'SR', cat: 'D 代價', desc: '等效成本破 $3000（隱藏）',  hidden: true, cond: (c) => c.costUSD >= 3000 },
+  { id: 'burn_5k',        name: '揮金如土',         rarity: 'UR', cat: 'D 代價', desc: '等效成本破 $5000',          cond: (c) => c.costUSD >= 5000 },
+  { id: 'burn_10k',       name: '富可敵國',         rarity: 'LR', cat: 'D 代價', desc: '等效成本破 $10000',         cond: (c) => c.costUSD >= 10000 },
+  // E 習慣（時段/耐力）
+  { id: 'night_mage',      name: '夜術士',     rarity: 'R',  cat: 'E 習慣', desc: '0–5 點完成任務',     cond: (c) => c.night },
+  { id: 'morning_adv',     name: '晨型冒險者', rarity: 'R',  cat: 'E 習慣', desc: '5–8 點完成任務',     cond: (c) => c.morning },
+  { id: 'weekend_warrior', name: '假日狂戰士', rarity: 'R',  cat: 'E 習慣', desc: '週末完成任務',       cond: (c) => c.weekend },
+  { id: 'sleepless',       name: '不眠騎士',   rarity: 'SR', cat: 'E 習慣', desc: '單日使用 > 12 小時',  cond: (c) => c.maxDayActiveHours > SLEEPLESS_HR },
+  { id: 'marathon',        name: '馬拉松',     rarity: 'SR', cat: 'E 習慣', desc: '單 session > 6 小時', cond: (c) => c.maxSessionHours > MARATHON_HR },
+  { id: 'iron_will',       name: '鋼鐵意志',   rarity: 'SR', cat: 'E 習慣', desc: '生涯使用 ≥ 500 小時', cond: (c) => c.careerHours >= 500 },
+  // F 幽默/隱藏
+  { id: 'phoenix',      name: '浴火重生',   rarity: 'R',  cat: 'F 幽默', desc: '連 3 敗後達成任務',     cond: (c) => c.phoenix },
+  { id: 'terse',        name: '惜字如金',   rarity: 'N',  cat: 'F 幽默', desc: '< 10 字完成任務',       cond: (c) => c.terse },
+  { id: 'talkative',    name: '話癆',       rarity: 'N',  cat: 'F 幽默', desc: '單日 > 50 次對話',       cond: (c) => c.maxDayConv > TALKATIVE_MIN },
+  { id: 'butterfinger', name: '手滑藝術家', rarity: 'N',  cat: 'F 幽默', desc: '常錯累積 3 次',         cond: (c) => c.regressCount >= REGRESS_BADGE_MIN },
+  { id: 'recidivist',   name: '慣犯',       rarity: 'R',  cat: 'F 幽默', desc: '常錯累積 10 次',        cond: (c) => c.regressCount >= 10 },
+  { id: 'caffeine',     name: '咖啡因中毒', rarity: 'SR', cat: 'F 幽默', desc: '單日 > 200 次對話（隱藏）', hidden: true, cond: (c) => c.maxDayConv > 200 },
+  // G 技藝（廣度）
+  { id: 'jack_of_trades',    name: '多才',       rarity: 'R',  cat: 'G 技藝', desc: '用過 ≥ 5 種技能',  cond: (c) => c.distinctSkills >= 5 },
+  { id: 'polymath',          name: '博學者',     rarity: 'SR', cat: 'G 技藝', desc: '用過 ≥ 10 種技能', cond: (c) => c.distinctSkills >= 10 },
+  { id: 'dungeon_explorer',  name: '地城探索者', rarity: 'R',  cat: 'G 技藝', desc: '踏足 ≥ 5 個地城',   cond: (c) => c.distinctDungeons >= 5 },
+  { id: 'dungeon_conqueror', name: '地城征服者', rarity: 'SR', cat: 'G 技藝', desc: '踏足 ≥ 15 個地城',  cond: (c) => c.distinctDungeons >= 15 },
+  { id: 'scholar',           name: '求道者',     rarity: 'R',  cat: 'G 技藝', desc: '心法累積 ≥ 50',     cond: (c) => c.lessonCount >= 50 },
+  // H 里程（生涯量級）
+  { id: 'library_1k',  name: '圖書館長',   rarity: 'R',  cat: 'H 里程', desc: '等效閱讀 ≥ 1,000 本',     cond: (c) => c.books >= 1000 },
+  { id: 'library_5k',  name: '萬卷藏書',   rarity: 'SR', cat: 'H 里程', desc: '等效閱讀 ≥ 5,000 本',     cond: (c) => c.books >= 5000 },
+  { id: 'data_flood',  name: '資料洪流',   rarity: 'SR', cat: 'H 里程', desc: '總處理量 ≥ 100 億 token', cond: (c) => c.totalProcessed >= 1e10 },
+  { id: 'centenarian', name: '百日老兵',   rarity: 'R',  cat: 'H 里程', desc: '活躍 ≥ 100 天',           cond: (c) => c.distinctActiveDays >= 100 },
 ];
 function badgeById(id) { return ACHIEVEMENTS.find((b) => b.id === id) || null; }
 
@@ -135,11 +163,29 @@ function buildBadgeContext(state, log, d) {
     if (e.kind === 'fail') fails++;
     else if (e.kind === 'task') { if (fails >= 3) phoenix = true; fails = 0; }
   }
+  // v2.7 新增 ctx 欄（純讀 log+derived，零副作用）：B 投入改錨 raw、G 技藝廣度、H 生涯里程
+  const lessonCount = log.filter((e) => e.kind === 'lesson').length;
+  const skillSet = new Set(), dungeonSet = new Set(), daySet = new Set();
+  for (const e of log) {
+    if (Array.isArray(e.skills)) for (const s of e.skills) skillSet.add(s);
+    if (e.dungeon) dungeonSet.add(e.dungeon);
+    if (e.ts) daySet.add(e.ts.slice(0, 10));
+  }
+  const tiers = d.tierCount || { D: 0, C: 0, B: 0, A: 0, S: 0 };
+  const questDays = (tiers.D || 0) + (tiers.C || 0) + (tiers.B || 0) + (tiers.A || 0) + (tiers.S || 0);
   return {
     taskCount, regressCount, night, morning, weekend, terse, phoenix,
     maxDayConv: d.maxDayConversations || 0, maxDayActiveHours: d.maxDayActiveHours || 0, maxSessionHours: d.maxSessionHours || 0,
     billable: d.billable || 0, costUSD: d.costUSD || 0, commandLevel: d.commandLevel || 0, slayLevel: d.slayLevel || 0,
-    tiers: d.tierCount || { D: 0, C: 0, B: 0, A: 0, S: 0 }, maxQuest: d.maxQuestBillable || 0,
+    tiers, maxQuest: d.maxQuestBillable || 0,
+    // v2.7
+    conversations: d.conversations || 0,
+    pureTyped: Math.max(0, (d.typedChars || 0) - (d.codeChars || 0)),
+    totalProcessed: d.totalProcessed || 0,
+    careerHours: d.activeHours || 0,
+    books: BOOK_EQUIV(d.billable || 0),
+    questDays, lessonCount,
+    distinctSkills: skillSet.size, distinctDungeons: dungeonSet.size, distinctActiveDays: daySet.size,
   };
 }
 function evalBadges(ctx) {
@@ -899,6 +945,9 @@ function deriveAchievements(p = paths(), opts = {}) {
   const ctx = buildBadgeContext(computeState(log), log, derived);
   const nowUnlocked = evalBadges(ctx);
   const unlocked = Object.assign({}, prev.unlocked || {});
+  // v2.7：prune 已退役（無 ACHIEVEMENTS 定義）的孤兒 id（如 supersede 掉的 cmd_10/slay_25）；不違反只進不退——榮譽由改名後新 id 承接
+  const validIds = new Set(ACHIEVEMENTS.map((b) => b.id));
+  for (const id of Object.keys(unlocked)) if (!validIds.has(id)) delete unlocked[id];
   const newly = [];
   for (const id of nowUnlocked) { if (!unlocked[id]) { unlocked[id] = now(); newly.push(id); } }
   // PR records 合併
