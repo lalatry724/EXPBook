@@ -1,6 +1,6 @@
 # ExpBook 規格書（冒險者公會制）
 
-> 版本：v2.5（2026-06-11 23:46:43）。本檔為**權威規格**；操作指引見 `../SKILL.md`，實作見 `../scripts/exp.cjs`。
+> 版本：v2.6（2026-06-12）。本檔為**權威規格**；操作指引見 `../SKILL.md`，實作見 `../scripts/exp.cjs`。
 > 命名：**ExpBook = 系統名**；**EXP = 經驗值單位**。
 
 ---
@@ -332,5 +332,6 @@ remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除�
 | v2.4 | 2026-06-09 | 技能分類（§2.1）：技能 tag 易長成扁平長列（曾累 35 個），面板改「分類小計」。`exp.cjs` 加 `SKILL_GROUPS` 表（核心6+工具鏈5）+ `categorizeSkills()` render-time 分組；純渲染非破壞（log.jsonl 原 tag 保留為明細，`‹a·b·c›` 顯示成員）；未列入 tag 自動歸「未分類」群；守恆＝分類小計總和=原始技能槽位總和 |
 | v2.5 | 2026-06-11 | **衍生層（主體）**：疊加四等級軸（②精英 ③指揮 ④殺敵）＋雙消耗儀表板（⑤魔力 ⑥金幣）＋四元素（徽章25枚/稱號/streak護符/彩蛋/PR）＋燃料儀表板（委託D~S/token流量/書本換算）＋衍生引擎 `deriveAchievements`＋event `cwd` 欄。皆純衍生·零 EXP。設計定稿見 `docs/superpowers/specs/2026-06-11-expbook-v2.5-design.md`。**主角定調＝使用者本人**。**+ Mac 相容修復**：`resolveHome()` 與兩 hook 載入路徑改 `__dirname` 推導 CLI home（原寫死 `~/.gemini` → Claude 下 hook no-op、資料誤落 `.gemini`）；改後雙 CLI 各自獨立、`EXPBOOK_HOME` 可覆寫 |
 | v2.5-doc | 2026-06-12 | **SPEC 補完衍生層**（doc-sync 修 desync）：本檔原僅記到 §1–§8 核心經濟＋把 v2.5 誤標為「只有 Mac 修復」，衍生層全散在 design/plan 檔。新增 §9–§14（衍生層總覽/四等級軸/雙消耗儀表板/燃料儀表板/四元素/衍生引擎），數值自 `exp.cjs` 實碼取，doc/SPEC.md 自此為衍生層執行期權威。同步新增 repo 根 `CLAUDE.md` 開發守門人（改 ExpBook 前先讀 SPEC+design） |
+| **v2.6** | 2026-06-12 | **等級/委託/面板精修（異動大，逐項）**：① 指揮等級 sqrt→**線性 ÷1000**（每 1000 對話 +1 級）；② 殺敵等級 sqrt→**線性 ÷100 萬字**（每 100 萬純打字 +1 級）；③ 三基本軸（冒險者/指揮/殺敵）統一 **1-based、預設 Lv1**；④ **精英等級移出面板顯示**（移為待設計 feature，`eliteLevel()`/精英分 計算保留）；⑤ **委託 per-task 區間→per-day**（一天一委託，`questsByDay` 讀 `scan.perDay`）；⑥ **委託界線重訂 4 Gate 500萬/1000萬/3000萬/5000萬**（中文單位，原錨太鬆全判 S）；⑦ **委託下限 `QUEST_FLOOR`＝10 萬**（不到不算委託）；⑧ STATUS 面板新增 **指揮/殺敵 與冒險者同款詳列**（新增 `progressBy` 通用 1-based 進度）；⑨ **`FLOW_LABEL.input`「你新送進」→「輸入」**；⑩ 提示鏈修補：新增 repo 根 `CLAUDE.md` 開發守門人（破口1）+ §9–14 衍生層基線補完（破口2，見 v2.5-doc）。校準 live：指揮 Lv3／殺敵 Lv2／委託 D10·C7·B8·A1·S0；測試 42/42 綠 |
 
 > 遷移每步皆有 `log.jsonl.bak-*` 備份留底（收於該 CLI home 的 `expbook/backups/`：Claude `~/.claude/expbook/backups/`／gemini `~/.gemini/expbook/backups/`）。
