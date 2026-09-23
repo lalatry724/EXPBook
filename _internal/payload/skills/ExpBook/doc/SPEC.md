@@ -1,6 +1,6 @@
 # ExpBook 規格書（冒險者公會制）
 
-> 版本：v2.8.1（2026-06-12）。本檔為**權威規格**；操作指引見 `../SKILL.md`，實作見 `../scripts/exp.cjs`。
+> 版本：v2.8.2（2026-09-23）。本檔為**權威規格**；操作指引見 `../SKILL.md`，實作見 `../scripts/exp.cjs`。
 > 命名：**ExpBook = 系統名**；**EXP = 經驗值單位**。
 
 ---
@@ -220,15 +220,19 @@ remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除�
 - **精英＝隱藏等級（v2.8 啟用）**：②精英 Lv0 不顯示；**Lv1（≥50 精英分）起現身**，列於冒險者後（成果組 ①②）。曲線/Gate 見 §10.1。燃料儀表板 §12.1 仍列精英分原始值。
 - `🔥N` ＝連勤 streak（§13.3）；`(PRn)` 僅在最長連勤 > 目前時附加。
 
-**定價表**（每百萬 token，2026-06；查 `claude-api` skill 為準，常數 `PRICING`）：
+**定價表**（每百萬 token，2026-09；查 `claude-api` skill 為準，常數 `PRICING`＝有序陣列）：
 
-| model | input | output | cache_write | cache_read |
-|-------|-------|--------|-------------|------------|
-| Opus   | $5 | $25 | $6.25 | $0.5 |
-| Sonnet | $3 | $15 | $3.75 | $0.3 |
-| Haiku  | $1 | $5  | $1.25 | $0.1 |
+| key（子字串） | input | output | cache_write 5m | cache_write 1h | cache_read |
+|---------------|-------|--------|----------------|----------------|------------|
+| `fable-5-1` / `mythos-5-1` | $10 | $50 | $12.5 | $20 | $0.25 |
+| `fable` / `mythos`         | $10 | $50 | $12.5 | $20 | $1 |
+| `opus-5-5`                 | $4  | $20 | $5    | $8  | $0.2 |
+| `opus`（5 / 4.x）          | $5  | $25 | $6.25 | $10 | $0.5 |
+| `sonnet-5`                 | $2  | $10 | $2.5  | $4  | $0.2 |
+| `sonnet`（4.x）            | $3  | $15 | $3.75 | $6  | $0.3 |
+| `haiku`                    | $1  | $5  | $1.25 | $2  | $0.1 |
 
-錢 = Σ(各 model 各欄 × 單價)；model 名以 opus/sonnet/haiku 子字串匹配，未知不計。
+錢 = Σ(各 model 各欄 × 單價)；model 名依表序**第一個命中的子字串**取價（特定版號排在泛 tier 前），未知不計。cache write 依 TTL 分價：scan 另累計 `usage.cache_creation.ephemeral_1h_input_tokens` 為 `byModel[m].cacheCreation1h`（只供計價，不進 flows / billable），1h 分量 × 1h 價、其餘 × 5m 價。
 
 ---
 
@@ -354,5 +358,6 @@ remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除�
 | **v2.7** | 2026-06-12 | **徽章再設計（25→47 枚 八類）**：① **B 投入 4 枚 level 門檻徽章 supersede**（`cmd_10`/`cmd_50`/`slay_25`/`slay_50` 在 v2.6 大除數下永久鎖死）→ 改錨對話次數(1千/5千/2萬/5萬)與純打字字數(100萬/500萬/2000萬/5000萬) raw 里程碑；② **巨龍討伐者 re-anchor** 單日委託 1000萬→**3000萬**(per-day 下原值天天觸發失稀有性)；③ **新增 G 技藝**(多才/博學者/地城探索者/地城征服者/求道者)、**H 里程**(圖書館長/萬卷藏書/資料洪流/百日老兵) 兩類；④ A/C/D/E/F 各補梯度(身經百戰/委託熟手/公會柱石/精銳獵人/吞噬者/富可敵國/鋼鐵意志/慣犯/咖啡因中毒)；⑤ `buildBadgeContext` 補 10 個 ctx 欄(純讀 log+derived、零副作用)、`BOOK_EQUIV` helper；⑥ 全部純衍生·零 EXP·門檻錨 live 真實值之上、不灌水。⑦ **精英軸重設計提案**入 §10.1(碼凍結、僅存查)。測試 48/48 綠。三軸等級試算表見 `_internal/report/level-calc-2026-06-12.md` |
 | **v2.6** | 2026-06-12 | **等級/委託/面板精修（異動大，逐項）**：① 指揮等級 sqrt→**線性 ÷1000**（每 1000 對話 +1 級）；② 殺敵等級 sqrt→**線性 ÷100 萬字**（每 100 萬純打字 +1 級）；③ 三基本軸（冒險者/指揮/殺敵）統一 **1-based、預設 Lv1**；④ **精英等級移出面板顯示**（移為待設計 feature，`eliteLevel()`/精英分 計算保留）；⑤ **委託 per-task 區間→per-day**（一天一委託，`questsByDay` 讀 `scan.perDay`）；⑥ **委託界線重訂 4 Gate 500萬/1000萬/3000萬/5000萬**（中文單位，原錨太鬆全判 S）；⑦ **委託下限 `QUEST_FLOOR`＝10 萬**（不到不算委託）；⑧ STATUS 面板新增 **指揮/殺敵 與冒險者同款詳列**（新增 `progressBy` 通用 1-based 進度）；⑨ **`FLOW_LABEL.input`「你新送進」→「輸入」**；⑩ 提示鏈修補：新增 repo 根 `CLAUDE.md` 開發守門人（破口1）+ §9–14 衍生層基線補完（破口2，見 v2.5-doc）。校準 live：指揮 Lv3／殺敵 Lv2／委託 D10·C7·B8·A1·S0；測試 42/42 綠 |
 | v2.8.1 | 2026-06-12 | **面板第一行三小修（純顯示＋指令別名，無經濟異動）**：① `renderPanelLine` 冒險者等級後加 `(into/step)`＝`(當級已累積/升級所需)`（改用 `progressFor` 取代 `levelFor`）；② 新增 `show` 指令——重算一次（`deriveAchievements`）後**只印面板第一行**、不寫/不讀 STATUS.md（與整份報告的 `status` 區隔）；③ `fmtUSD` `$`→`US$`（標明美金，面板/燃料儀表板/`derive` 三處同步）。校準 live：`冒險者9(874/1000)`、`金幣US$4,851` |
+| v2.8.2 | 2026-09-23 | **定價更新（純展示欄，無經濟異動）**：`PRICING` 改有序子字串陣列、按版號分價——補上漏掉的 **Fable/Mythos**（舊版不在表內＝成本記 $0）、Opus 5.5 $4/$20、Sonnet 5 $2/$10、Fable 5.1 cache read $0.25；cache write 依 transcript 的 5m/1h 分量分開計（Claude Code 主迴圈用 1h＝input×2，舊版全按 5m 低估）。live 快照 US$8,495→US$9,385。只動金幣展示值；等級/EXP/精英/委託不受影響，已解鎖徽章只進不退。 |
 
 > 遷移每步皆有 `log.jsonl.bak-*` 備份留底（收於該 CLI home 的 `expbook/backups/`：Claude `~/.claude/expbook/backups/`／gemini `~/.gemini/expbook/backups/`）。

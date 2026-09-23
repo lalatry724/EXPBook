@@ -46,12 +46,20 @@ const QUEST_TIERS = [
 const ELITE_WEIGHT = { D: 1, C: 2, B: 3, A: 5, S: 25 }; // 精英分權重（v2.8：S 8→25，高價值主貨幣）
 function projectsRoot() { return path.join(os.homedir(), '.claude', 'projects'); }
 const ACTIVE_GAP_MS = 15 * 60000;           // 使用時間：相鄰訊息 gap<15 分才累加
-// 定價（每百萬 token，2026-06；查 claude-api skill 為準，變動只重算展示欄、不影響等級）
-const PRICING = {
-  opus:   { in: 5,  out: 25, cc: 6.25, cr: 0.5 },
-  sonnet: { in: 3,  out: 15, cc: 3.75, cr: 0.3 },
-  haiku:  { in: 1,  out: 5,  cc: 1.25, cr: 0.1 },
-};
+// 定價（每百萬 token，2026-09；查 claude-api skill 為準，變動只重算展示欄、不影響等級）
+// key 以子字串比對 model id，由上往下第一個命中 → 特定版號排在泛 tier 前面。
+// cc＝5m cache write（input×1.25）、cc1h＝1h cache write（input×2，Claude Code 主迴圈用）。
+const PRICING = [
+  ['fable-5-1',  { in: 10, out: 50, cc: 12.5, cc1h: 20, cr: 0.25 }],
+  ['mythos-5-1', { in: 10, out: 50, cc: 12.5, cc1h: 20, cr: 0.25 }],
+  ['fable',      { in: 10, out: 50, cc: 12.5, cc1h: 20, cr: 1 }],
+  ['mythos',     { in: 10, out: 50, cc: 12.5, cc1h: 20, cr: 1 }],
+  ['opus-5-5',   { in: 4,  out: 20, cc: 5,    cc1h: 8,  cr: 0.2 }],
+  ['opus',       { in: 5,  out: 25, cc: 6.25, cc1h: 10, cr: 0.5 }],
+  ['sonnet-5',   { in: 2,  out: 10, cc: 2.5,  cc1h: 4,  cr: 0.2 }],
+  ['sonnet',     { in: 3,  out: 15, cc: 3.75, cc1h: 6,  cr: 0.3 }],
+  ['haiku',      { in: 1,  out: 5,  cc: 1.25, cc1h: 2,  cr: 0.1 }],
+];
 
 // ---- v2.5 顯示層常數 ----
 const ELITE_STEP = 50;        // 精英每級門檻（v2.8 平線：cost=50/級，Lv_n 累計門檻=50n）
@@ -841,9 +849,10 @@ function scanTranscripts(root = projectsRoot()) {
           tok.cacheCreation += u.cache_creation_input_tokens || 0;
           tok.cacheRead += u.cache_read_input_tokens || 0;
           const m = msg.model || 'unknown';
-          const bm = byModel[m] || (byModel[m] = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 });
+          const bm = byModel[m] || (byModel[m] = { input: 0, output: 0, cacheCreation: 0, cacheCreation1h: 0, cacheRead: 0 });
           bm.input += u.input_tokens || 0; bm.output += u.output_tokens || 0;
           bm.cacheCreation += u.cache_creation_input_tokens || 0; bm.cacheRead += u.cache_read_input_tokens || 0;
+          bm.cacheCreation1h += (u.cache_creation && u.cache_creation.ephemeral_1h_input_tokens) || 0; // 只供計價（cacheCreation 已含）
           const b = BILLABLE(u);
           sessBill += b;
           if (tsMs != null && !Number.isNaN(tsMs)) { messages.push({ ts: tsMs, billable: b }); perDay[tsRaw.slice(0, 10)] = (perDay[tsRaw.slice(0, 10)] || 0) + b; } // NaN guard 與 tsList 一致：壞 timestamp 不入區間 join
@@ -878,14 +887,15 @@ function activeHours(tsList) {
   for (let i = 1; i < a.length; i++) { const d = a[i] - a[i - 1]; if (d > 0 && d < ACTIVE_GAP_MS) total += d; }
   return total / 3600000;
 }
-// 等效成本 $：每 model 各欄 × 單價（model 名以 opus/sonnet/haiku 子字串匹配；未知→不計）
+// 等效成本 $：每 model 各欄 × 單價（PRICING 有序子字串比對，第一個命中；未知→不計）
+// cache write 依 TTL 分價：1h 分量 × cc1h、其餘（5m）× cc。
 function costOf(byModel) {
   let usd = 0;
   for (const [model, v] of Object.entries(byModel)) {
-    const key = /opus/i.test(model) ? 'opus' : /sonnet/i.test(model) ? 'sonnet' : /haiku/i.test(model) ? 'haiku' : null;
-    if (!key) continue;
-    const pr = PRICING[key];
-    usd += (v.input * pr.in + v.output * pr.out + v.cacheCreation * pr.cc + v.cacheRead * pr.cr) / 1e6;
+    const hit = PRICING.find(([k]) => model.toLowerCase().includes(k));
+    if (!hit) continue;
+    const pr = hit[1], cc1h = v.cacheCreation1h || 0;
+    usd += (v.input * pr.in + v.output * pr.out + (v.cacheCreation - cc1h) * pr.cc + cc1h * pr.cc1h + v.cacheRead * pr.cr) / 1e6;
   }
   return usd;
 }
