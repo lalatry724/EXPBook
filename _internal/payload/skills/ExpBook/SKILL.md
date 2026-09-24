@@ -1,9 +1,9 @@
 ---
 name: ExpBook
-description: Agent 成長歷程系統（ExpBook，冒險者公會制）。用 exp.cjs 記錄每輪工作（任務/心法/練功/敗戰/常錯）、依口語產生玩家面板與報告檔。EXP 為經驗值、ExpBook 為系統名。Triggers：「檢視玩家面板」「show ExpBook status」「ExpBook help」「看歷程」「週報」「看 X 地城」「看 X 技能」。
+description: 使用者的成長歷程系統（ExpBook，冒險者公會制；AI 為記錄引擎）。用 exp.cjs 記錄每輪工作（任務/心法/練功/敗戰/常錯）、依口語產生玩家面板與報告檔。EXP 為經驗值、ExpBook 為系統名。Triggers：「檢視玩家面板」「show ExpBook status」「ExpBook help」「看歷程」「週報」「看 X 地城」「看 X 技能」。
 ---
 
-# ExpBook — Agent 成長歷程系統（冒險者公會制）
+# ExpBook — 使用者成長歷程系統（冒險者公會制）
 
 腳本：`scripts/exp.cjs`（純 Node，零依賴）。資料在所屬 CLI home 的 `expbook/` 下（由 `exp.cjs:resolveHome()` 從 `__dirname` 推導：Claude→`~/.claude/expbook/`、gemini→`~/.gemini/expbook/`；可用 `EXPBOOK_HOME` 覆寫）。完整規格：`doc/SPEC.md`。
 （命名：**ExpBook = 系統名**；**EXP = 經驗值單位**。對話一律稱 ExpBook。）

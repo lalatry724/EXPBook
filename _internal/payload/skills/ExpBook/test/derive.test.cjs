@@ -123,7 +123,19 @@ test('scanTranscripts 彙總 token/對話/打字（排除 tool_result 與 < 開�
     assert.strictEqual(s.codeChars > 0, true);
     assert.strictEqual([...'幫我修這個 bug'].length <= s.userChars, true);
     assert.strictEqual(s.byModel['claude-opus-4-8'].input, 100);
-    assert.strictEqual(s.messages.length >= 1, true); // 至少 assistant 那筆有 billable
+  } finally { fx.rm(root); }
+});
+
+test('scanTranscripts：subagents/ 下 token 照計、但不算使用者打字', () => {
+  const root = fx.tmpProjects([
+    { proj: 'p', file: 's1.jsonl', lines: [fx.userMsg('2026-06-01T10:00:00.000Z', 'abc')] },
+    { proj: 'p/s1/subagents', file: 'agent-x.jsonl', lines: [fx.userMsg('2026-06-01T10:01:00.000Z', 'subagent prompt'), fx.asstMsg('2026-06-01T10:02:00.000Z', 'claude-opus-4-8', { in: 50 })] },
+  ]);
+  try {
+    const s = exp.scanTranscripts(root);
+    assert.strictEqual(s.userTurns, 1);
+    assert.strictEqual(s.userChars, 3);
+    assert.strictEqual(s.tok.input, 50);
   } finally { fx.rm(root); }
 });
 

@@ -15,8 +15,8 @@ test('fmtWan：字元 → 萬字（1 位小數）', () => {
 });
 
 test('fmtUSD：四捨五入 + 千分位', () => {
-  assert.strictEqual(exp.fmtUSD(3990.4), '$3,990');
-  assert.strictEqual(exp.fmtUSD(0), '$0');
+  assert.strictEqual(exp.fmtUSD(3990.4), 'US$3,990');
+  assert.strictEqual(exp.fmtUSD(0), 'US$0');
 });
 
 test('eliteLevel（v2.8 平線）：Lv=⌊分/50⌋、預設 Lv0', () => {
@@ -53,16 +53,16 @@ const D = { elitePoints: 5000, commandLevel: 22, slayLevel: 51, totalProcessed: 
 
 test('renderPanelLine（v2.8）：精英 Lv1+ 顯示，列於冒險者後', () => {
   const line = exp.renderPanelLine(stateAt(18), D); // elitePoints 5000 → eliteLevel 100
-  assert.match(line, /\[等級\] 冒險者18 精英100 指揮22 殺敵51/);
-  assert.match(line, /\[消耗\] 魔力50\.1億\(有效2\.04億\) 金幣\$3,990/);
+  assert.match(line, /\[等級\] 冒險者18\(0\/1000\) 精英100 指揮22 殺敵51/);
+  assert.match(line, /\[消耗\] 魔力50\.1億\(有效2\.04億\) 金幣US\$3,990/);
 });
 
 test('renderPanelLine（v2.8）：精英隱藏等級——分<50（Lv0）不顯示、≥50（Lv1）顯示', () => {
   const lo = exp.renderPanelLine(stateAt(18), { ...D, elitePoints: 49 });
   assert.doesNotMatch(lo, /精英/);                         // Lv0 隱藏
-  assert.match(lo, /\[等級\] 冒險者18 指揮22 殺敵51/);
+  assert.match(lo, /\[等級\] 冒險者18\(0\/1000\) 指揮22 殺敵51/);
   const hi = exp.renderPanelLine(stateAt(18), { ...D, elitePoints: 50 });
-  assert.match(hi, /冒險者18 精英1 指揮22/);                // 剛踩進 Lv1 即現身
+  assert.match(hi, /冒險者18\(0\/1000\) 精英1 指揮22/);                // 剛踩進 Lv1 即現身
 });
 
 test('renderFuelDashboard：委託/四分項人話/書本/時間/代價齊備', () => {
@@ -103,7 +103,7 @@ test('renderStatus 有 derived → 疊一行面板 + 燃料儀表板', () => {
     tierCount: { D: 1, C: 0, B: 0, A: 0, S: 0 }, flows: { input: 1, output: 1, cacheCreation: 1, cacheRead: 1 },
     conversations: 2129, typedChars: 2082000, codePct: 0.28, activeHours: 116.6,
   });
-  assert.match(out, /\[等級\] 冒險者18 指揮22 殺敵51/);
+  assert.match(out, /\[等級\] 冒險者18\(0\/1000\) 指揮22 殺敵51/);
   assert.match(out, /燃料儀表板/);
 });
 

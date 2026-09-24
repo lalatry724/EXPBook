@@ -46,10 +46,24 @@ const QUEST_TIERS = [
 const ELITE_WEIGHT = { D: 1, C: 2, B: 3, A: 5, S: 25 }; // 精英分權重（v2.8：S 8→25，高價值主貨幣）
 function projectsRoot() { return path.join(os.homedir(), '.claude', 'projects'); }
 const ACTIVE_GAP_MS = 15 * 60000;           // 使用時間：相鄰訊息 gap<15 分才累加
-// 定價（每百萬 token，2026-09；查 claude-api skill 為準，變動只重算展示欄、不影響等級）
+// 定價（每百萬 token；變動只重算展示欄、不影響等級）。真相源：~/.claude/tools/token-usage-pricing.json（啟動時讀，
+// 欄位 in/out/cw/cw1h/cr → 此處 in/out/cc/cc1h/cr）；讀不到或欄位不合才用下方內建表（2026-09 快照）。
 // key 以子字串比對 model id，由上往下第一個命中 → 特定版號排在泛 tier 前面。
 // cc＝5m cache write（input×1.25）、cc1h＝1h cache write（input×2，Claude Code 主迴圈用）。
-const PRICING = [
+const PRICING_FILE = path.join(os.homedir(), '.claude', 'tools', 'token-usage-pricing.json');
+function loadPricing(fallback) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(PRICING_FILE, 'utf8')).pricing;
+    const rows = Object.entries(raw).map(([k, r]) => [k, { in: r.in, out: r.out, cc: r.cw, cc1h: r.cw1h, cr: r.cr }]);
+    const bad = rows.some(([, r]) => Object.values(r).some((n) => typeof n !== 'number' || !(n >= 0)));
+    if (!rows.length || bad) throw new Error('欄位不合');
+    return rows;
+  } catch (err) {
+    if (err.code !== 'ENOENT') process.stderr.write(`[ExpBook] 定價檔讀取失敗，改用內建表：${err.message}\n`);
+    return fallback;
+  }
+}
+const PRICING = loadPricing([
   ['fable-5-1',  { in: 10, out: 50, cc: 12.5, cc1h: 20, cr: 0.25 }],
   ['mythos-5-1', { in: 10, out: 50, cc: 12.5, cc1h: 20, cr: 0.25 }],
   ['fable',      { in: 10, out: 50, cc: 12.5, cc1h: 20, cr: 1 }],
@@ -59,7 +73,7 @@ const PRICING = [
   ['sonnet-5',   { in: 2,  out: 10, cc: 2.5,  cc1h: 4,  cr: 0.2 }],
   ['sonnet',     { in: 3,  out: 15, cc: 3.75, cc1h: 6,  cr: 0.3 }],
   ['haiku',      { in: 1,  out: 5,  cc: 1.25, cc1h: 2,  cr: 0.1 }],
-];
+]);
 
 // ---- v2.5 顯示層常數 ----
 const ELITE_STEP = 50;        // 精英每級門檻（v2.8 平線：cost=50/級，Lv_n 累計門檻=50n）
@@ -751,7 +765,7 @@ function commandLevel(conversations) { return Math.floor(Math.max(0, conversatio
 function slayLevel(typedChars) { return Math.floor(Math.max(0, typedChars) / SLAY_DIVISOR) + 1; }
 function _todayStr() { return now().slice(0, 10); }
 
-// 日曆週桶（7 天，Monday 對齊；epoch day0=Thu，+4 使 Monday 起算為整數邊界）
+// 日曆週桶（7 天，週日起算：epoch day0=Thu，+4 使邊界落在 Sat→Sun）
 function weekIndex(ms) { return Math.floor((Math.floor(ms / 86400000) + 4) / 7); }
 
 // 連勤（design §3.3 反焦慮版）：活躍日=有 task event 的日期；護符＝每進入一個新日曆週發 1 枚，
@@ -803,16 +817,14 @@ function _isToolResult(content) {
 }
 function _emptyScan() {
   return { tok: { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 }, byModel: {}, billable: 0, totalProcessed: 0,
-    messages: [], tsList: [], perSession: [], perDay: {}, userTurns: 0, userChars: 0, codeChars: 0,
+    tsList: [], perDay: {}, userTurns: 0, userChars: 0, codeChars: 0,
     msgCount: 0, fileCount: 0, minTs: null, maxTs: null,
     perDayTurns: {}, perDayChars: {}, sessionSpans: [] };
 }
 function scanTranscripts(root = projectsRoot()) {
   const tok = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
   const byModel = {};
-  const messages = [];                 // {ts:ms, billable} 供委託區間 join（僅含有 usage 的訊息）
   const tsList = [];                   // 所有訊息 timestamp（ms）供使用時間
-  const perSession = [];               // 每檔計費等效
   const perDay = {};                   // 'YYYY-MM-DD' → 計費等效
   let userTurns = 0, userChars = 0, codeChars = 0, msgCount = 0, fileCount = 0;
   let minTs = null, maxTs = null;
@@ -820,13 +832,12 @@ function scanTranscripts(root = projectsRoot()) {
   const perDayChars = {};
   const sessionSpans = [];
   if (!fs.existsSync(root)) return _emptyScan();
-  const walk = (dir) => {
+  const walk = (dir, inSub = false) => {          // inSub：subagents/ 下是 AI 互談，token 照計（真實花費），但不算使用者打字
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, e.name);
-      if (e.isDirectory()) { walk(p); continue; }
+      if (e.isDirectory()) { walk(p, inSub || e.name === 'subagents'); continue; }
       if (!e.name.endsWith('.jsonl')) continue;
       fileCount++;
-      let sessBill = 0;
       let sessMin = null, sessMax = null;
       for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
         if (!line.trim()) continue;
@@ -854,11 +865,10 @@ function scanTranscripts(root = projectsRoot()) {
           bm.cacheCreation += u.cache_creation_input_tokens || 0; bm.cacheRead += u.cache_read_input_tokens || 0;
           bm.cacheCreation1h += (u.cache_creation && u.cache_creation.ephemeral_1h_input_tokens) || 0; // 只供計價（cacheCreation 已含）
           const b = BILLABLE(u);
-          sessBill += b;
-          if (tsMs != null && !Number.isNaN(tsMs)) { messages.push({ ts: tsMs, billable: b }); perDay[tsRaw.slice(0, 10)] = (perDay[tsRaw.slice(0, 10)] || 0) + b; } // NaN guard 與 tsList 一致：壞 timestamp 不入區間 join
+          if (tsMs != null && !Number.isNaN(tsMs)) perDay[tsRaw.slice(0, 10)] = (perDay[tsRaw.slice(0, 10)] || 0) + b; // NaN guard 與 tsList 一致：壞 timestamp 不入每日彙總
           msgCount++;
         }
-        if (role === 'user' && msg.content != null && !_isToolResult(msg.content)) {
+        if (!inSub && role === 'user' && msg.content != null && !_isToolResult(msg.content)) {
           const t = _txtOf(msg.content);
           if (t && !t.startsWith('<')) {            // 排除系統注入（startsWith('<') 粗濾）
             userTurns++; userChars += [...t].length;
@@ -868,14 +878,13 @@ function scanTranscripts(root = projectsRoot()) {
           }
         }
       }
-      if (sessBill > 0) perSession.push(sessBill);
       if (sessMin != null && sessMax != null && sessMax > sessMin) sessionSpans.push(sessMax - sessMin); // 單 session(檔)時長
     }
   };
   walk(root);
   const billable = tok.input + tok.output + tok.cacheCreation;
   return { tok, byModel, billable, totalProcessed: billable + tok.cacheRead,
-    messages, tsList, perSession, perDay, userTurns, userChars, codeChars, // perSession/perDay：Plan 2 分位校準/每日里程碑用
+    tsList, perDay, userTurns, userChars, codeChars, // perDay：每日里程碑用
     msgCount, fileCount, minTs, maxTs,
     perDayTurns, perDayChars, sessionSpans };
 }

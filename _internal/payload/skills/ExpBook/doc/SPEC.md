@@ -1,13 +1,13 @@
 # ExpBook 規格書（冒險者公會制）
 
-> 版本：v2.8.2（2026-09-23）。本檔為**權威規格**；操作指引見 `../SKILL.md`，實作見 `../scripts/exp.cjs`。
+> 版本：v2.8.3（2026-09-24）。本檔為**權威規格**；操作指引見 `../SKILL.md`，實作見 `../scripts/exp.cjs`。
 > 命名：**ExpBook = 系統名**；**EXP = 經驗值單位**。
 
 ---
 
 ## 1. 目的與哲學
 
-ExpBook 是 **Agent（AI）的成長歷程系統**：把每輪工作量化成經驗值，沉澱成可回看的冒險者生涯。
+ExpBook 是 **使用者的成長歷程系統**（AI 為記錄引擎與協作夥伴）：把每輪工作量化成經驗值，沉澱成可回看的冒險者生涯。
 
 核心哲學（決定一切規則）：
 
@@ -25,7 +25,7 @@ ExpBook 是 **Agent（AI）的成長歷程系統**：把每輪工作量化成經
 
 | 層 | 名稱 | 說明 |
 |----|------|------|
-| All | **冒險者等級** | 所有經歷累積＝AI 的總成長 |
+| All | **冒險者等級** | 所有經歷累積＝使用者的總成長 |
 | tag 類① | **地城（專案）** | 每筆必帶；跨專案累積熟練度。未指明 → 預設 `日常訓練(雜項)`。一資料夾＝一地城 |
 | tag 類② | **技能（能力）** | 每筆選填、可多項。預設 7 技能恆顯示，**可自由新增**其他技能 tag |
 
@@ -72,6 +72,12 @@ ExpBook 是 **Agent（AI）的成長歷程系統**：把每輪工作量化成經
 | `STATUS.md` | 玩家面板（每次寫入/`status` 重新產生） |
 | `views/*.md` | 各式檢視報告（history / dungeon-X / skill-X / report-期間） |
 | `_pending.jsonl` | A+C 暫存區（stage 寫入、flush 沖刷後清空） |
+| `config.json` | 使用者覆寫（選填）：`exp_of` 改各 kind 的 EXP（只影響之後新事件）、`title_pin` 釘選稱號 |
+| `achievements.json` | 衍生快取：已解鎖徽章（`unlocked[id]=ts`）、derived 指標、個人 PR、`last_scanned_ts`。`status`/`show`/`derive`/`flush` 重算；可 rebuild 重現，不污染 SoT |
+| `_last_flush.txt` | 最近一次 `flush` 的入帳明細（`lastflush` 指令讀它） |
+| `_reminder.txt` | Stop hook 寫的一次性提醒（「有新 commit 但本輪沒 stage」）；下一輪 prompt hook 讀出注入後即刪 |
+| `_seen_commits.json` | Stop hook 記已處理過的 commit hash（最多 200 筆），防重複提醒 |
+| `backups/` | 重大遷移 / flush 前的 log、state 快照；命名規則見該目錄 `README.md` |
 
 **事件（event）JSON 結構：**
 ```json
@@ -80,7 +86,7 @@ ExpBook 是 **Agent（AI）的成長歷程系統**：把每輪工作量化成經
 ```
 - `dungeon` 省略代表無地城（實務上 CLI 一律補預設地城）。
 - `skills` 省略或空陣列代表不掛技能。
-- `exp` 為寫入當下快照；**state 一律以 `kind` 經 `EXP_OF` 即時重算**，故改數值後 `rebuild` 即全域生效，`exp` 欄僅供顯示/稽核。
+- `exp` 為寫入當下快照，**入帳優先採用**（`e.exp` 有值即用）；`config.json` 改 rate 只影響**之後新事件**，`rebuild` **不回溯**既有事件。（對照 `exp.cjs` `expDeltaOf`、SKILL.md、GUIDE.md）
 - **向後相容**：舊事件若無 `skills` 但有 `type` 欄，`eventSkills()` 會把 `type` 視為單一技能。
 
 ---
@@ -111,6 +117,8 @@ report --since <今日|本週|本月|YYYY-MM-DD[..YYYY-MM-DD]>  → views/report
 ```
 stage --kind <task|lesson|chore|fail|regress> "<事由>" [--dungeon ..] [--skill ..]
 flush                       把 _pending 全部沖進 log（Stop hook 每輪呼叫）
+lastflush                   印上一次 flush 的入帳明細（讀 `_last_flush.txt`）
+derive                      掃 transcript 重算衍生指標 → `achievements.json`（顯式重算入口，§14.1）
 rebuild ｜ init ｜ help
 remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除並重建
 ```
@@ -128,8 +136,18 @@ remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除�
 
 ## 7. 渲染規則
 
-- 面板每列格式：`LV{等級} ({當級EXP}/{升級門檻}) Total:{總EXP}`（無進度條，三層皆同）。
-- 面板（STATUS.md）順序：冒險者等級 → 地城（依 EXP 降序）→ 技能（先固定 7 項，再額外技能依 EXP 降序）。
+`status` 產生的 `STATUS.md`（`renderStatus`）由上而下：
+
+1. **一行面板**（有衍生資料才有；格式見 §11）。`show` 只印這一行。
+2. **冒險者**：`冒險者　LV{等級}〈{稱號}〉 ({當級EXP}/{升級門檻}) Total:{總EXP}`（稱號僅在有已解鎖徽章時出現，§13.2）。
+3. **軸②③④詳列**（有衍生資料才有）：精英（Lv1 起才列，§10.1）／指揮／殺敵，格式同冒險者行；殺敵單位為萬字。
+4. **地城（專案）**：依 EXP 降序，`【名稱】 LV.. (..) Total:..`。
+5. **技能（能力）**：`categorizeSkills()` 依 `SKILL_GROUPS` 分類小計（〔核心〕〔工具鏈〕），`‹…›` 附原始細項；未列入者歸〔未分類〕。預設 7 技能恆存在於 state，渲染時併入所屬分類（如「工具」→「工具·其它」）。
+6. **燃料儀表板**（§12）。
+7. **徽章**（`renderBadges`，已解鎖/總數＋八類清單，§13.1）與 **個人紀錄** 一行（§13.5）。
+8. 尾行 `更新時間：{state.updated}`。
+
+- 各等級列格式：`LV{等級} ({當級EXP}/{升級門檻}) Total:{總EXP}`（無進度條）。
 - 歷程行格式：`時間  +EXP  [kind顯示名]  (地城)  {技能·技能} 事由`。
 - 報告檔安全：檢視檔名經 `safeName()` 去除路徑穿越字元。
 
@@ -154,7 +172,7 @@ remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除�
 
 - **純衍生、零 EXP 入口**：所有衍生機制都不寫 `log.jsonl`、不影響任何 EXP，不得新增可被刷的計分管道（守第 4 柱「不刷分」）。
 - **資料源**：`~/.claude/projects/*/*.jsonl` 每訊息 `usage`（input / output / cache_creation / cache_read）＋ `log.jsonl`。
-- **度量基準＝計費等效 token ＝ input + output + cache_creation**（排除 cache_read；實測佔比 ~96% 且隨對話自動膨脹、最廉價，計入會嚴重失真並誘刷）。
+- **度量基準＝計費等效 token ＝ input + output + cache_creation**（排除 cache_read；實測佔比 ~98% 且隨對話自動膨脹、最廉價，計入會嚴重失真並誘刷）。
 - **主角＝使用者本人**：衍生等級＝使用者投入 AI 協作的累積證明。「薄 AI」僅約束執行面。
 - **存檔**：衍生結果寫 `achievements.json`（衍生快取，可 rebuild 重算），不污染 SoT。
 
@@ -175,7 +193,7 @@ remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除�
 - **投入組（③④）**：你付出多少、抗灌水。③ 幾乎不可刷；④ 含貼上非 code 文字（無法剔除，見 §12.4），標「輸入文字量」非「純手打」。
 - 棄用 `input_tokens` 當投入錨（混系統/工具 token、受 context 膨脹灌水）。
 - **曲線取捨（v2.5-doc 改）**：原 ③④ 用平方根（後期邊際遞減、防爆級）；改採**大除數線性**——刻意「不浮灌、等級該有深度」（指揮每 1000 對話、殺敵每 100 萬字才 1 級）。代價：後期不再遞減，投入越多等級線性無上限拉高。
-- 校準真實值（2026-06-12 live，1-based）：對話 2,394 次 → 指揮 **Lv3**；純打字 ~182 萬字 → 殺敵 **Lv2**。
+- 校準真實值（2026-09-24 live，1-based）：對話 2,093 次 → 指揮 **Lv3**；純打字 ~150.2 萬字 → 殺敵 **Lv2**。
 
 ### 10.1 精英軸（②；v2.8 啟用 · 常數 `ELITE_*`）
 
@@ -195,7 +213,7 @@ remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除�
 - **生涯計數不受 Gate**：`tierCount`（燃料儀表板 D~S 計數）照記全部委託日，Gate 只影響升級用的 `elitePoints`。
 
 **門檻對位**：Lv1=50・Lv5=250・Lv20=1,000・Lv50=2,500・Lv100=5,000 分。一個 S 日=半級、兩個 S 日=整級。
-**校準（2026-06-12 live）**：D10·C7·B8·A1·S0、加權分 **53**（Gate 未觸發）→ 精英 **Lv1**（啟用即現身）。
+**校準（2026-09-24 live）**：D1·C6·B16·A0·S0、加權分 **61**（Gate 未觸發）→ 精英 **Lv1**（啟用即現身）。
 
 > 設計沿革：v2.5 原 cost(n)=round(500×1.2^(n-1)) ＋ 冒險者 LV50 解鎖閘 → 雙重鎖死（live 分 53「<<」500、且 LV9「<<」50），整軸凍結、面板隱藏。v2.7 記錄重設計提案。v2.8 定案改「平線 50/級 ＋ S25 ＋ 逐階退役 Gate」，並移除從未接線的 `ELITE_UNLOCK_LV`。
 
@@ -214,13 +232,13 @@ remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除�
 
 **一行式面板格式**（`renderPanelLine`，數字用中文數量級 億／萬字）：
 ```
-[等級] 冒險者9(874/1000) 精英1 指揮3 殺敵2 🔥8   [消耗] 魔力59.2億(有效2.52億) 金幣US$4,851
+[等級] 冒險者80(807/1000) 精英1 指揮3 殺敵2 🔥3(PR10)   [消耗] 魔力131.2億(有效3.03億) 金幣US$9,497
 ```
 左＝會升級的榮譽（成果＋投入），右＝只增的代價。冒險者後括號＝`(當級已累積/升級所需)` 即 `(into/step)`。單位：token→億（1 億=100M）、字數→萬字、錢→US$（美金）。
 - **精英＝隱藏等級（v2.8 啟用）**：②精英 Lv0 不顯示；**Lv1（≥50 精英分）起現身**，列於冒險者後（成果組 ①②）。曲線/Gate 見 §10.1。燃料儀表板 §12.1 仍列精英分原始值。
 - `🔥N` ＝連勤 streak（§13.3）；`(PRn)` 僅在最長連勤 > 目前時附加。
 
-**定價表**（每百萬 token，2026-09；查 `claude-api` skill 為準，常數 `PRICING`＝有序陣列）：
+**定價表**（每百萬 token，2026-09 快照；真相源＝`~/.claude/tools/token-usage-pricing.json`，`exp.cjs` 啟動時讀該檔〔`cw`→5m、`cw1h`→1h〕，讀不到或欄位不合才用內建 `PRICING` 有序陣列並在 stderr 告警）：
 
 | key（子字串） | input | output | cache_write 5m | cache_write 1h | cache_read |
 |---------------|-------|--------|----------------|----------------|------------|
@@ -254,7 +272,7 @@ remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除�
 | A | 3000 萬 – 5000 萬 | `[3e7, 5e7)` |
 | S | > 5000 萬 | `[5e7, ∞)` |
 
-校準（2026-06-12 live，26 天）：D10／C7／B8／A1／S0（峰值單日 ~3665 萬）。
+校準（2026-09-24 live）：D1／C6／B16／A0／S0。
 
 ### 12.2 token 流量明細（`FLOW_LABEL`，四分項各自累積 ＋ 人話）
 
@@ -267,7 +285,7 @@ remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除�
 
 ### 12.3 其餘生涯統計
 
-- 對話次數（role=user 且非 tool_result；`startsWith('<')` 粗濾系統注入）。
+- 對話次數（role=user 且非 tool_result；`startsWith('<')` 粗濾系統注入）。**`subagents/` 目錄下的 transcript 不計對話與打字**（那是 AI 互相對話，實測曾佔約 14%）；其 token 仍照計（真實花費）。
 - 打字量（user 訊息字元數，標 ``` code fence %）。
 - 使用時間（相鄰訊息 gap < 15 分才累加，常數 `ACTIVE_GAP_MS`）。
 - token 總量。
@@ -313,7 +331,7 @@ remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除�
 ### 13.3 streak 連勤（`computeStreak`，反焦慮版）
 
 - 活躍日 ＝ 當日 ≥1 task event。面板 `🔥N`。
-- **護符機制**：每進入一個新日曆週自動發 1 枚，斷 1 天消耗 1 枚、不算斷（`weekIndex` Monday 對齊）。
+- **護符機制**：每進入一個新日曆週自動發 1 枚，斷 1 天消耗 1 枚、不算斷（`weekIndex` 以**週日起算**，Sat→Sun 換週）。
 - **不歸零羞辱**：斷掉後 current 歸 0，longest（PR）永久保留。
 - 慶祝里程碑：7／30（`STREAK_CELEBRATE`）。
 
@@ -354,10 +372,11 @@ remove --last｜--ts "<時間戳>"｜--match "<事由片段>"   從 log 移除�
 | v2.4 | 2026-06-09 | 技能分類（§2.1）：技能 tag 易長成扁平長列（曾累 35 個），面板改「分類小計」。`exp.cjs` 加 `SKILL_GROUPS` 表（核心6+工具鏈5）+ `categorizeSkills()` render-time 分組；純渲染非破壞（log.jsonl 原 tag 保留為明細，`‹a·b·c›` 顯示成員）；未列入 tag 自動歸「未分類」群；守恆＝分類小計總和=原始技能槽位總和 |
 | v2.5 | 2026-06-11 | **衍生層（主體）**：疊加四等級軸（②精英 ③指揮 ④殺敵）＋雙消耗儀表板（⑤魔力 ⑥金幣）＋四元素（徽章25枚/稱號/streak護符/彩蛋/PR）＋燃料儀表板（委託D~S/token流量/書本換算）＋衍生引擎 `deriveAchievements`＋event `cwd` 欄。皆純衍生·零 EXP。設計定稿見 `docs/superpowers/specs/2026-06-11-expbook-v2.5-design.md`。**主角定調＝使用者本人**。**+ Mac 相容修復**：`resolveHome()` 與兩 hook 載入路徑改 `__dirname` 推導 CLI home（原寫死 `~/.gemini` → Claude 下 hook no-op、資料誤落 `.gemini`）；改後雙 CLI 各自獨立、`EXPBOOK_HOME` 可覆寫 |
 | v2.5-doc | 2026-06-12 | **SPEC 補完衍生層**（doc-sync 修 desync）：本檔原僅記到 §1–§8 核心經濟＋把 v2.5 誤標為「只有 Mac 修復」，衍生層全散在 design/plan 檔。新增 §9–§14（衍生層總覽/四等級軸/雙消耗儀表板/燃料儀表板/四元素/衍生引擎），數值自 `exp.cjs` 實碼取，doc/SPEC.md 自此為衍生層執行期權威。同步新增 repo 根 `CLAUDE.md` 開發守門人（改 ExpBook 前先讀 SPEC+design） |
-| **v2.8** | 2026-06-12 | **精英軸②正式啟用（從凍結→可玩）**：① 等級曲線 指數 cost(n)=round(500×1.2^(n-1)) → **平線 `ELITE_STEP=50`/級**（Lv=⌊分/50⌋、預設 Lv0、心算得出）；② 權重 `ELITE_WEIGHT` **S 8→25**（高價值主貨幣，一個 S 日=半級）；③ 新增**逐階退役 Gate** `ELITE_GATE={D:20,C:50,B:100}`（達該精英級後該階委託停記分→「愈精英愈只認高價值」）；④ 精英分改 **`eliteScore()` 按日序逐筆 fold**（非總分布×權重，因 Gate 令當日得分依入帳前等級；只進不退、rebuild 可重現）；⑤ **隱藏等級**——Lv0 不上面板、Lv1（≥50 分）起 `renderPanelLine` 列於冒險者後＋`renderStatus` 補「精英　LV」詳列；⑥ **移除從未接線的 `ELITE_UNLOCK_LV`**（冒險者 LV50 解鎖閘）。校準 live：D10·C7·B8·A1·S0→加權分 53→精英 **Lv1**（啟用即現身）。設計理由：精英＝四軸中唯一「不直觀、需經營」的深度軸，帶隱藏價值感。測試 51/51 綠 |
-| **v2.7** | 2026-06-12 | **徽章再設計（25→47 枚 八類）**：① **B 投入 4 枚 level 門檻徽章 supersede**（`cmd_10`/`cmd_50`/`slay_25`/`slay_50` 在 v2.6 大除數下永久鎖死）→ 改錨對話次數(1千/5千/2萬/5萬)與純打字字數(100萬/500萬/2000萬/5000萬) raw 里程碑；② **巨龍討伐者 re-anchor** 單日委託 1000萬→**3000萬**(per-day 下原值天天觸發失稀有性)；③ **新增 G 技藝**(多才/博學者/地城探索者/地城征服者/求道者)、**H 里程**(圖書館長/萬卷藏書/資料洪流/百日老兵) 兩類；④ A/C/D/E/F 各補梯度(身經百戰/委託熟手/公會柱石/精銳獵人/吞噬者/富可敵國/鋼鐵意志/慣犯/咖啡因中毒)；⑤ `buildBadgeContext` 補 10 個 ctx 欄(純讀 log+derived、零副作用)、`BOOK_EQUIV` helper；⑥ 全部純衍生·零 EXP·門檻錨 live 真實值之上、不灌水。⑦ **精英軸重設計提案**入 §10.1(碼凍結、僅存查)。測試 48/48 綠。三軸等級試算表見 `_internal/report/level-calc-2026-06-12.md` |
 | **v2.6** | 2026-06-12 | **等級/委託/面板精修（異動大，逐項）**：① 指揮等級 sqrt→**線性 ÷1000**（每 1000 對話 +1 級）；② 殺敵等級 sqrt→**線性 ÷100 萬字**（每 100 萬純打字 +1 級）；③ 三基本軸（冒險者/指揮/殺敵）統一 **1-based、預設 Lv1**；④ **精英等級移出面板顯示**（移為待設計 feature，`eliteLevel()`/精英分 計算保留）；⑤ **委託 per-task 區間→per-day**（一天一委託，`questsByDay` 讀 `scan.perDay`）；⑥ **委託界線重訂 4 Gate 500萬/1000萬/3000萬/5000萬**（中文單位，原錨太鬆全判 S）；⑦ **委託下限 `QUEST_FLOOR`＝10 萬**（不到不算委託）；⑧ STATUS 面板新增 **指揮/殺敵 與冒險者同款詳列**（新增 `progressBy` 通用 1-based 進度）；⑨ **`FLOW_LABEL.input`「你新送進」→「輸入」**；⑩ 提示鏈修補：新增 repo 根 `CLAUDE.md` 開發守門人（破口1）+ §9–14 衍生層基線補完（破口2，見 v2.5-doc）。校準 live：指揮 Lv3／殺敵 Lv2／委託 D10·C7·B8·A1·S0；測試 42/42 綠 |
+| **v2.7** | 2026-06-12 | **徽章再設計（25→47 枚 八類）**：① **B 投入 4 枚 level 門檻徽章 supersede**（`cmd_10`/`cmd_50`/`slay_25`/`slay_50` 在 v2.6 大除數下永久鎖死）→ 改錨對話次數(1千/5千/2萬/5萬)與純打字字數(100萬/500萬/2000萬/5000萬) raw 里程碑；② **巨龍討伐者 re-anchor** 單日委託 1000萬→**3000萬**(per-day 下原值天天觸發失稀有性)；③ **新增 G 技藝**(多才/博學者/地城探索者/地城征服者/求道者)、**H 里程**(圖書館長/萬卷藏書/資料洪流/百日老兵) 兩類；④ A/C/D/E/F 各補梯度(身經百戰/委託熟手/公會柱石/精銳獵人/吞噬者/富可敵國/鋼鐵意志/慣犯/咖啡因中毒)；⑤ `buildBadgeContext` 補 10 個 ctx 欄(純讀 log+derived、零副作用)、`BOOK_EQUIV` helper；⑥ 全部純衍生·零 EXP·門檻錨 live 真實值之上、不灌水。⑦ **精英軸重設計提案**入 §10.1(碼凍結、僅存查)。測試 48/48 綠。三軸等級試算表見 `_internal/report/level-calc-2026-06-12.md` |
+| **v2.8** | 2026-06-12 | **精英軸②正式啟用（從凍結→可玩）**：① 等級曲線 指數 cost(n)=round(500×1.2^(n-1)) → **平線 `ELITE_STEP=50`/級**（Lv=⌊分/50⌋、預設 Lv0、心算得出）；② 權重 `ELITE_WEIGHT` **S 8→25**（高價值主貨幣，一個 S 日=半級）；③ 新增**逐階退役 Gate** `ELITE_GATE={D:20,C:50,B:100}`（達該精英級後該階委託停記分→「愈精英愈只認高價值」）；④ 精英分改 **`eliteScore()` 按日序逐筆 fold**（非總分布×權重，因 Gate 令當日得分依入帳前等級；只進不退、rebuild 可重現）；⑤ **隱藏等級**——Lv0 不上面板、Lv1（≥50 分）起 `renderPanelLine` 列於冒險者後＋`renderStatus` 補「精英　LV」詳列；⑥ **移除從未接線的 `ELITE_UNLOCK_LV`**（冒險者 LV50 解鎖閘）。校準 live：D10·C7·B8·A1·S0→加權分 53→精英 **Lv1**（啟用即現身）。設計理由：精英＝四軸中唯一「不直觀、需經營」的深度軸，帶隱藏價值感。測試 51/51 綠 |
 | v2.8.1 | 2026-06-12 | **面板第一行三小修（純顯示＋指令別名，無經濟異動）**：① `renderPanelLine` 冒險者等級後加 `(into/step)`＝`(當級已累積/升級所需)`（改用 `progressFor` 取代 `levelFor`）；② 新增 `show` 指令——重算一次（`deriveAchievements`）後**只印面板第一行**、不寫/不讀 STATUS.md（與整份報告的 `status` 區隔）；③ `fmtUSD` `$`→`US$`（標明美金，面板/燃料儀表板/`derive` 三處同步）。校準 live：`冒險者9(874/1000)`、`金幣US$4,851` |
 | v2.8.2 | 2026-09-23 | **定價更新（純展示欄，無經濟異動）**：`PRICING` 改有序子字串陣列、按版號分價——補上漏掉的 **Fable/Mythos**（舊版不在表內＝成本記 $0）、Opus 5.5 $4/$20、Sonnet 5 $2/$10、Fable 5.1 cache read $0.25；cache write 依 transcript 的 5m/1h 分量分開計（Claude Code 主迴圈用 1h＝input×2，舊版全按 5m 低估）。live 快照 US$8,495→US$9,385。只動金幣展示值；等級/EXP/精英/委託不受影響，已解鎖徽章只進不退。 |
+| v2.8.3 | 2026-09-24 | **純修 bug（文件對齊程式，無經濟異動）**：① 本檔 §4 補 `config.json`/`achievements.json`/`_last_flush.txt`/`_reminder.txt`/`_seen_commits.json`/`backups/`、§5 補 `lastflush`/`derive`、§7 依 `renderStatus` 現況重寫、§4 `exp` 欄語意改為「入帳快照優先、改 rate 不回溯」（原句與程式相反）、§1/§2 主角措辭改「使用者」（v2.5 定案未落地）、§13.3 週界註解改「週日起算」（不改碼）；② 面板範例與各校準值統一取 2026-09-24 live 快照；③ `scanTranscripts`：`subagents/` 下 transcript 不計使用者對話/打字（token 照計），刪 `messages`/`perSession` 死碼——live 對話 2,190→2,093、純打字 −32 萬字、成本不變；④ `PRICING` 改讀 `token-usage-pricing.json`（內建表為 fallback）；⑤ `panel.test.cjs` 4 個斷言跟上 v2.8.1（`US$`、`冒險者N(into/step)`）。測試 51/51 綠（原 50＋新增 subagents 1）。 |
 
 > 遷移每步皆有 `log.jsonl.bak-*` 備份留底（收於該 CLI home 的 `expbook/backups/`：Claude `~/.claude/expbook/backups/`／gemini `~/.gemini/expbook/backups/`）。
